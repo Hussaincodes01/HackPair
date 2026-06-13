@@ -1,0 +1,62 @@
+{
+  "name": "hackpair",
+  "displayName": "HackSync",
+  "description": "Real-time code collaboration. Connect to a HackSync server and code with your team.",
+  "version": "0.2.0",
+  "publisher": "Hussaincodes01",
+  "icon": "icon.png",
+  "license": "MIT",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "keywords": ["collaboration", "real-time", "hackathon", "live-share"],
+  "activationEvents": [
+    "onCommand:hacksync.join",
+    "onCommand:hacksync.createRoom",
+    "onCommand:hacksync.leave"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "hacksync.join", "title": "HackSync: Join Room" },
+      { "command": "hacksync.createRoom", "title": "HackSync: Create Room" },
+      { "command": "hacksync.leave", "title": "HackSync: Leave Room" }
+    ],
+    "viewsContainers": {
+      "activitybar": [{ "id": "hacksync", "title": "HackSync", "icon": "$(sync)" }]
+    },
+    "views": {
+      "hacksync": [{
+        "type": "webview",
+        "id": "hacksync.panel",
+        "name": "HackSync"
+      }]
+    },
+    "configuration": {
+      "title": "HackSync",
+      "properties": {
+        "hacksync.serverUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Server URL (ask your team lead for this)"
+        },
+        "hacksync.displayName": {
+          "type": "string",
+          "default": "",
+          "description": "Your name shown to teammates"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --minify"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "socket.io-client": "^4.7.0"
+  }
+}

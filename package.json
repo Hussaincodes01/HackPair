@@ -1,0 +1,20 @@
+{
+  "name": "hacksync-oss",
+  "private": true,
+  "workspaces": [
+    "packages/shared",
+    "packages/dashboard",
+    "packages/server",
+    "packages/extension"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=packages/dashboard",
+    "dev:server": "npm run dev --workspace=packages/server",
+    "build": "npm run build --workspace=packages/shared && npm run build --workspace=packages/dashboard && npm run build --workspace=packages/extension",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
