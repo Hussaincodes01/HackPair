@@ -8,7 +8,7 @@
 
 No cloud. No dashboard. No Docker. Just your IDE and your team.
 
-[![Version](https://img.shields.io/badge/version-0.2.1-blue?style=flat-square)](https://github.com/Hussaincodes01/hackpair/releases)
+[![Version](https://img.shields.io/badge/version-0.2.3-blue?style=flat-square)](https://github.com/Hussaincodes01/hackpair/releases)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-purple?style=flat-square&logo=visual-studio-code&logoColor=white)](https://code.visualstudio.com)
 [![Node](https://img.shields.io/badge/Node-18+-brightgreen?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
@@ -49,10 +49,10 @@ HackPair lets you and your teammates code together from anywhere. See each other
 
 ### 1. Install
 
-Download `hackpair-0.2.1.vsix` from [Releases](https://github.com/Hussaincodes01/hackpair/releases) and install:
+Download `hackpair-0.2.3.vsix` from [Releases](https://github.com/Hussaincodes01/hackpair/releases) and install:
 
 ```bash
-code --install-extension hackpair-0.2.1.vsix
+code --install-extension hackpair-0.2.3.vsix
 ```
 
 ### 2. Create Room
