@@ -3,14 +3,14 @@
   "private": true,
   "workspaces": [
     "packages/shared",
-    "packages/dashboard",
+    "packages/dashboard-tool",
     "packages/server",
     "packages/extension"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace=packages/dashboard",
+    "dev": "npm run dev --workspace=packages/dashboard-tool",
     "dev:server": "npm run dev --workspace=packages/server",
-    "build": "npm run build --workspace=packages/shared && npm run build --workspace=packages/dashboard && npm run build --workspace=packages/extension",
+    "build": "npm run build --workspace=packages/shared && npm run build --workspace=packages/dashboard-tool && npm run build --workspace=packages/extension",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },

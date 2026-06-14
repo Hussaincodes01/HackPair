@@ -4,6 +4,8 @@ import { Server as SocketIOServer } from "socket.io";
 import { createDatabase, stmts } from "../../server/src/database";
 import { registerRoutes } from "../../server/src/routes/api";
 import { setupSocketIO } from "../../server/src/socket/handler";
+import { isAllowedOrigin } from "../../server/src/cors";
+import { startTunnel, ActiveTunnel } from "../../server/src/tunnel";
 import os from "os";
 
 const PORT = parseInt(process.env.PORT || "3001");
@@ -31,23 +33,7 @@ async function main() {
   });
 
   await app.register(cors, {
-    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-      if (!origin) return callback(null, true);
-      try {
-        const url = new URL(origin);
-        const host = url.hostname;
-        if (
-          host === "localhost" ||
-          host === "127.0.0.1" ||
-          /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) ||
-          host.endsWith(".telebit.cloud") ||
-          host.endsWith(".telebit.local")
-        ) {
-          return callback(null, true);
-        }
-      } catch {}
-      callback(null, false);
-    },
+    origin: (origin, callback) => callback(null, isAllowedOrigin(origin)),
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization"],
   });
@@ -57,7 +43,7 @@ async function main() {
     try {
       const fs = require("fs");
       const path = require("path");
-      const htmlPath = path.join(__dirname, "..", "public", "dashboard.html");
+      const htmlPath = path.join(__dirname, "public", "dashboard.html");
       const html = fs.readFileSync(htmlPath, "utf8");
       return reply.type("text/html").send(html);
     } catch {
@@ -71,23 +57,7 @@ async function main() {
 
   const io = new SocketIOServer(app.server, {
     cors: {
-      origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-        if (!origin) return callback(null, true);
-        try {
-          const url = new URL(origin);
-          const host = url.hostname;
-          if (
-            host === "localhost" ||
-            host === "127.0.0.1" ||
-            /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) ||
-            host.endsWith(".telebit.cloud") ||
-            host.endsWith(".telebit.local")
-          ) {
-            return callback(null, true);
-          }
-        } catch {}
-        callback(null, false);
-      },
+      origin: (origin, callback) => callback(null, isAllowedOrigin(origin)),
       methods: ["GET", "POST"],
     },
     transports: ["websocket", "polling"],
@@ -100,18 +70,32 @@ async function main() {
     ? ips.map(ip => `  → http://${ip}:${PORT}`).join("\n")
     : `  → http://localhost:${PORT}`;
 
+  // Start a public Cloudflare tunnel automatically (no account / token needed).
+  // Falls back silently to local-network access if it can't be established.
+  let tunnel: ActiveTunnel | null = null;
+  let publicDisplay = "  (starting public tunnel…)";
+  try {
+    tunnel = await startTunnel(PORT);
+    publicDisplay = `  → ${tunnel.url}`;
+  } catch (err: any) {
+    publicDisplay = `  (public tunnel unavailable — local network only)`;
+    console.warn("HackPair: Cloudflare tunnel failed:", err?.message || err);
+  }
+
   console.log(`
   ╔══════════════════════════════════════╗
   ║       HackPair Server v0.1.0        ║
   ║   Real-time code collaboration      ║
   ╚══════════════════════════════════════╝
 
-  Server running at:
+  Local network:
 ${ipDisplay}
+
+  Public link (share with remote teammates):
+${publicDisplay}
 
   Dashboard: http://localhost:${PORT}
 
-  Share the URL with your team.
   They connect via the VS Code extension.
 
   Data stored in: ${process.env.HACKSYNC_DATA_DIR || "./.hacksync"}
@@ -120,6 +104,7 @@ ${ipDisplay}
 
   const shutdown = async () => {
     clearInterval(cleanupInterval);
+    tunnel?.stop();
     io.close();
     await app.close();
     process.exit(0);

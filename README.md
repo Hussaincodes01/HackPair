@@ -8,7 +8,7 @@
 
 No cloud. No dashboard. No Docker. Just your IDE and your team.
 
-[![Version](https://img.shields.io/badge/version-0.2.3-blue?style=flat-square)](https://github.com/Hussaincodes01/hackpair/releases)
+[![Version](https://img.shields.io/badge/version-0.2.4-blue?style=flat-square)](https://github.com/Hussaincodes01/hackpair/releases)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-purple?style=flat-square&logo=visual-studio-code&logoColor=white)](https://code.visualstudio.com)
 [![Node](https://img.shields.io/badge/Node-18+-brightgreen?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
@@ -49,11 +49,13 @@ HackPair lets you and your teammates code together from anywhere. See each other
 
 ### 1. Install
 
-Download `hackpair-0.2.3.vsix` from [Releases](https://github.com/Hussaincodes01/hackpair/releases) and install:
+Download `hackpair-0.2.4.vsix` from [Releases](https://github.com/Hussaincodes01/hackpair/releases) and install:
 
 ```bash
-code --install-extension hackpair-0.2.3.vsix
+code --install-extension hackpair-0.2.4.vsix
 ```
+
+> **Zero config.** No account, no token, no setup. Create a room and HackPair starts a public link for you automatically.
 
 ### 2. Create Room
 
@@ -101,7 +103,7 @@ Click any teammate → See their file tree → Click a file → Read their code.
 | Scenario | How |
 |----------|-----|
 | **Same WiFi** | Use your local IP: `http://192.168.x.x:3001` |
-| **Remote Team** | Built-in [Telebit](https://telebit.cloud) tunnel — automatic on room creation |
+| **Remote Team** | Built-in [Cloudflare](https://www.cloudflare.com/products/tunnel/) tunnel — fully automatic on room creation, no account or token |
 | **Port Forwarding** | Forward port 3001 on your router |
 
 ---

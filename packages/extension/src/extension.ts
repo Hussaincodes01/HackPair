@@ -4,17 +4,19 @@ import * as os from "os";
 import { SocketClient } from "./socket-client";
 import { CollaborationSidebar } from "./sidebar";
 import { CursorManager } from "./cursor-manager";
-import { TelebitTunnel } from "./tunnel";
-import { scanWorkspace, readFileContent, watchWorkspace, FileTreeItem } from "./workspace";
+import { CloudflareTunnel } from "./tunnel";
+import { scanWorkspace, readFileContent, watchWorkspace } from "./workspace";
 
 let socketClient: SocketClient | null = null;
 let sidebar: CollaborationSidebar | null = null;
 let cursorManager: CursorManager | null = null;
 let serverProcess: any = null;
-let telebitTunnel: TelebitTunnel | null = null;
+let cfTunnel: CloudflareTunnel | null = null;
+let workspaceWatcher: vscode.Disposable | null = null;
 let extContext: vscode.ExtensionContext;
 let workspaceFolder: string = "";
 let fileContents: Map<string, string> = new Map();
+let canEditRemote = false;
 
 function getLocalIPs(): string[] {
   const interfaces = os.networkInterfaces();
@@ -33,7 +35,7 @@ function startServer(port: number = 3001): Promise<{ port: number; url: string }
     const { spawn } = require("child_process");
     const childEnv: Record<string, string> = { PORT: String(port) };
     for (const key of Object.keys(process.env)) {
-      if (key.startsWith("TELEBIT_") || key === "NODE_ENV" || key === "HOME" || key === "USERPROFILE" || key === "PATH") {
+      if (key.startsWith("CLOUDFLARED_") || key === "NODE_ENV" || key === "HOME" || key === "USERPROFILE" || key === "PATH") {
         childEnv[key] = process.env[key]!;
       }
     }
@@ -69,6 +71,25 @@ function stopServer() {
   if (serverProcess) { serverProcess.kill(); serverProcess = null; }
 }
 
+function stopWorkspaceWatcher() {
+  workspaceWatcher?.dispose();
+  workspaceWatcher = null;
+}
+
+async function resolveWorkspaceFolder(): Promise<string | null> {
+  const current = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (current) return current;
+
+  const folder = await vscode.window.showOpenDialog({
+    canSelectFolders: true,
+    canSelectFiles: false,
+    openLabel: "Share This Folder",
+    title: "Select workspace folder to share",
+  });
+
+  return folder?.[0]?.fsPath || null;
+}
+
 function parseInviteLink(link: string): { serverUrl: string; inviteCode: string } | null {
   try {
     const trimmed = link.trim();
@@ -89,6 +110,18 @@ async function syncWorkspace() {
   socketClient.emitWorkspaceSync(fileTree);
 }
 
+function startWorkspaceSync() {
+  stopWorkspaceWatcher();
+  setTimeout(() => syncWorkspace(), 500);
+  workspaceWatcher = watchWorkspace(workspaceFolder, (event, relativePath) => {
+    syncWorkspace();
+    if (event === "changed" && canEditRemote) {
+      const content = readFileContent(workspaceFolder, relativePath);
+      socketClient?.emitCodeEdit(relativePath, content);
+    }
+  });
+}
+
 export function activate(ctx: vscode.ExtensionContext) {
   extContext = ctx;
   cursorManager = new CursorManager();
@@ -105,10 +138,10 @@ export function activate(ctx: vscode.ExtensionContext) {
       }
       await ctx.globalState.update("hackpair.displayName", displayName);
 
-      // Pick workspace folder
-      const folder = await vscode.window.showOpenDialog({ canSelectFolders: true, canSelectFiles: false, openLabel: "Share This Folder", title: "Select workspace folder to share" });
-      if (!folder || !folder[0]) return;
-      workspaceFolder = folder[0].fsPath;
+      const folder = await resolveWorkspaceFolder();
+      if (!folder) return;
+      workspaceFolder = folder;
+      canEditRemote = true;
 
       sidebar?.updateState({ connecting: true, error: "" });
       try {
@@ -117,48 +150,39 @@ export function activate(ctx: vscode.ExtensionContext) {
 
         let shareUrl = localUrl;
         try {
-          telebitTunnel = await TelebitTunnel.start(port);
-          const tunnelUrl = telebitTunnel.getUrl();
+          cfTunnel = await CloudflareTunnel.start(port);
+          const tunnelUrl = cfTunnel.getUrl();
           if (tunnelUrl) {
             shareUrl = tunnelUrl;
-            vscode.window.showInformationMessage(`HackPair: Tunnel active at ${tunnelUrl}`);
+            vscode.window.showInformationMessage(`HackPair: Public tunnel active.`);
           }
         } catch (tunnelErr: any) {
-          console.warn("HackPair: Telebit tunnel failed, using local URL:", tunnelErr.message);
-          vscode.window.showWarningMessage(`HackPair: Tunnel unavailable (${tunnelErr.message}). Using local IP.`);
+          console.warn("HackPair: Cloudflare tunnel failed, using local URL:", tunnelErr.message);
+          vscode.window.showWarningMessage(`HackPair: Public tunnel unavailable. Using local network link.`);
         }
 
         const res = await fetch(`${localUrl}/api/rooms`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: `${displayName}'s Room` }) });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const room = await res.json();
+        const room = await res.json() as { id: string; name: string; inviteCode: string };
 
         const joinRes = await fetch(`${localUrl}/api/rooms/${room.id}/join`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ displayName }) });
         if (!joinRes.ok) throw new Error("Failed to join");
-        const joinData = await joinRes.json();
+        const joinData = await joinRes.json() as { memberId: string; token: string };
 
         await ctx.globalState.update("hackpair.roomId", room.id);
         await ctx.globalState.update("hackpair.token", joinData.token);
         await ctx.globalState.update("hackpair.roomName", room.name);
         await ctx.globalState.update("hackpair.inviteCode", room.inviteCode);
         await ctx.globalState.update("hackpair.serverUrl", localUrl);
+        await ctx.globalState.update("hackpair.role", "host");
+        await ctx.globalState.update("hackpair.canEdit", true);
         const inviteUrl = `${shareUrl}?room=${room.inviteCode}`;
         await ctx.globalState.update("hackpair.inviteUrl", inviteUrl);
 
         connectToServer(localUrl, ctx, room.id, joinData.token);
 
-        sidebar?.updateState({ roomName: room.name, inviteCode: room.inviteCode, inviteUrl, memberId: joinData.memberId, displayName, connected: true, connecting: false });
-
-        // Sync workspace after connection
-        setTimeout(() => syncWorkspace(), 1000);
-
-        // Watch workspace for changes
-        watchWorkspace(workspaceFolder, (event, relativePath) => {
-          syncWorkspace();
-          if (event === "changed") {
-            const content = readFileContent(workspaceFolder, relativePath);
-            socketClient?.emitCodeEdit(relativePath, content);
-          }
-        });
+        sidebar?.updateState({ roomName: room.name, inviteCode: room.inviteCode, inviteUrl, memberId: joinData.memberId, displayName, connected: true, connecting: false, role: "host", canEdit: true });
+        startWorkspaceSync();
 
         vscode.window.showInformationMessage(`HackPair: Room created! Share the invite link.`);
       } catch (err: any) {
@@ -174,10 +198,10 @@ export function activate(ctx: vscode.ExtensionContext) {
       }
       await ctx.globalState.update("hackpair.displayName", displayName);
 
-      // Pick workspace folder
-      const folder = await vscode.window.showOpenDialog({ canSelectFolders: true, canSelectFiles: false, openLabel: "Share This Folder", title: "Select workspace folder to share" });
-      if (!folder || !folder[0]) return;
-      workspaceFolder = folder[0].fsPath;
+      const folder = await resolveWorkspaceFolder();
+      if (!folder) return;
+      workspaceFolder = folder;
+      canEditRemote = false;
 
       const parsed = parseInviteLink(msg.inviteLink || "");
       if (!parsed || !parsed.serverUrl) {
@@ -190,33 +214,26 @@ export function activate(ctx: vscode.ExtensionContext) {
         const { serverUrl, inviteCode } = parsed;
         const lookupRes = await fetch(`${serverUrl}/api/rooms/lookup?code=${encodeURIComponent(inviteCode)}`);
         if (!lookupRes.ok) throw new Error("Room not found.");
-        const { id: roomId, name: roomName } = await lookupRes.json();
+        const { id: roomId, name: roomName } = await lookupRes.json() as { id: string; name: string };
 
         const joinRes = await fetch(`${serverUrl}/api/rooms/${roomId}/join`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ displayName }) });
         if (!joinRes.ok) throw new Error("Failed to join");
-        const joinData = await joinRes.json();
+        const joinData = await joinRes.json() as { memberId: string; token: string };
 
         await ctx.globalState.update("hackpair.roomId", roomId);
         await ctx.globalState.update("hackpair.token", joinData.token);
         await ctx.globalState.update("hackpair.roomName", roomName);
         await ctx.globalState.update("hackpair.inviteCode", inviteCode);
         await ctx.globalState.update("hackpair.serverUrl", serverUrl);
+        await ctx.globalState.update("hackpair.role", "viewer");
+        await ctx.globalState.update("hackpair.canEdit", false);
         const inviteUrl = `${serverUrl}?room=${inviteCode}`;
         await ctx.globalState.update("hackpair.inviteUrl", inviteUrl);
 
         connectToServer(serverUrl, ctx, roomId, joinData.token);
 
-        sidebar?.updateState({ roomName, inviteCode, inviteUrl, memberId: joinData.memberId, displayName, connected: true, connecting: false });
-
-        setTimeout(() => syncWorkspace(), 1000);
-
-        watchWorkspace(workspaceFolder, (event, relativePath) => {
-          syncWorkspace();
-          if (event === "changed") {
-            const content = readFileContent(workspaceFolder, relativePath);
-            socketClient?.emitCodeEdit(relativePath, content);
-          }
-        });
+        sidebar?.updateState({ roomName, inviteCode, inviteUrl, memberId: joinData.memberId, displayName, connected: true, connecting: false, role: "viewer", canEdit: false });
+        startWorkspaceSync();
 
         vscode.window.showInformationMessage(`HackPair: Joined "${roomName}"`);
       } catch (err: any) {
@@ -240,7 +257,7 @@ export function activate(ctx: vscode.ExtensionContext) {
       sidebar?.updateState({ selectedMember: memberId, selectedMemberName: name });
 
       // If we don't have their file tree, request it
-      if (!sidebar?._state.fileTrees[memberId]) {
+      if (!sidebar?.hasFileTree(memberId)) {
         socketClient?.emitFileRequest(memberId, "__tree__");
       }
     }
@@ -264,17 +281,31 @@ export function activate(ctx: vscode.ExtensionContext) {
     }
 
     if (msg.type === "leave") {
-      telebitTunnel?.stop();
-      telebitTunnel = null;
+      cfTunnel?.stop();
+      cfTunnel = null;
+      stopWorkspaceWatcher();
+      canEditRemote = false;
       ctx.globalState.update("hackpair.roomId", undefined);
       ctx.globalState.update("hackpair.token", undefined);
       ctx.globalState.update("hackpair.roomName", undefined);
       ctx.globalState.update("hackpair.inviteCode", undefined);
       ctx.globalState.update("hackpair.inviteUrl", undefined);
+      ctx.globalState.update("hackpair.role", undefined);
+      ctx.globalState.update("hackpair.canEdit", undefined);
       socketClient?.disconnect();
       cursorManager?.clearAllCursors();
       sidebar?.reset();
       fileContents.clear();
+    }
+
+    if (msg.type === "requestEditAccess") {
+      const host = sidebar?.getHostMember();
+      if (!host) {
+        vscode.window.showWarningMessage("HackPair: Host is not connected yet.");
+        return;
+      }
+      socketClient?.emitEditRequest(host.memberId, "*");
+      vscode.window.showInformationMessage("HackPair: Edit access requested.");
     }
 
     if (msg.type === "copyInvite") {
@@ -293,9 +324,12 @@ export function activate(ctx: vscode.ExtensionContext) {
   const savedInviteCode = ctx.globalState.get<string>("hackpair.inviteCode");
   const savedInviteUrl = ctx.globalState.get<string>("hackpair.inviteUrl");
   const savedName = ctx.globalState.get<string>("hackpair.displayName");
+  const savedRole = ctx.globalState.get<string>("hackpair.role");
+  const savedCanEdit = ctx.globalState.get<boolean>("hackpair.canEdit") || savedRole === "host";
 
   if (savedRoomId && savedToken && savedServerUrl) {
-    sidebar?.updateState({ roomName: savedRoomName, inviteCode: savedInviteCode, inviteUrl: savedInviteUrl, displayName: savedName, connected: true });
+    canEditRemote = savedCanEdit;
+    sidebar?.updateState({ roomName: savedRoomName, inviteCode: savedInviteCode, inviteUrl: savedInviteUrl, displayName: savedName, connected: true, role: savedRole, canEdit: savedCanEdit });
     connectToServer(savedServerUrl, ctx, savedRoomId, savedToken);
   }
 
@@ -307,7 +341,7 @@ export function activate(ctx: vscode.ExtensionContext) {
   }));
 
   ctx.subscriptions.push(vscode.workspace.onDidChangeTextDocument((e) => {
-    if (socketClient?.isConnected()) {
+    if (socketClient?.isConnected() && canEditRemote) {
       const file = vscode.workspace.asRelativePath(e.document.fileName);
       socketClient.emitCodeEdit(file, e.document.getText());
     }
@@ -358,7 +392,52 @@ function connectToServer(url: string, ctx: vscode.ExtensionContext, roomId?: str
 
   // File content received
   socketClient.onFileContent((data) => {
+    if (data.filePath === "__tree__") {
+      try {
+        sidebar?.updateFileTree(data.memberId, JSON.parse(data.content));
+      } catch {}
+      return;
+    }
     openReadOnlyFile(data.displayName, data.filePath, data.content);
+  });
+
+  socketClient.onFileRequest((data) => {
+    const content = data.filePath === "__tree__"
+      ? JSON.stringify(scanWorkspace(workspaceFolder))
+      : readFileContent(workspaceFolder, data.filePath);
+    socketClient?.emitFileContent(data.fromSocketId, data.filePath, content);
+  });
+
+  socketClient.onEditRequest(async (data) => {
+    const choice = await vscode.window.showInformationMessage(
+      `${data.fromDisplayName} is requesting edit access.`,
+      "Grant",
+      "Deny"
+    );
+    if (choice === "Grant") {
+      socketClient?.emitEditGrant(data.fromSocketId, data.filePath || "*");
+      vscode.window.showInformationMessage(`HackPair: Edit access granted to ${data.fromDisplayName}.`);
+    } else {
+      socketClient?.emitEditDeny(data.fromSocketId, data.filePath || "*");
+    }
+  });
+
+  socketClient.onEditGrant(() => {
+    canEditRemote = true;
+    ctx.globalState.update("hackpair.canEdit", true);
+    sidebar?.updateState({ canEdit: true });
+    vscode.window.showInformationMessage("HackPair: Edit access granted.");
+  });
+
+  socketClient.onEditRevoke(() => {
+    canEditRemote = false;
+    ctx.globalState.update("hackpair.canEdit", false);
+    sidebar?.updateState({ canEdit: false });
+    vscode.window.showWarningMessage("HackPair: Edit access revoked.");
+  });
+
+  socketClient.onEditDeny(() => {
+    vscode.window.showWarningMessage("HackPair: Edit access denied.");
   });
 
   socketClient.connect();
@@ -376,29 +455,10 @@ function applyRemoteEdit(fileId: string, content: string) {
 }
 
 function openReadOnlyFile(memberName: string, filePath: string, content: string) {
-  const doc = vscode.window.activeTextEditor?.document;
   const fileName = path.basename(filePath);
-
-  // Create virtual document
-  const virtualUri = vscode.Uri.parse(`hackpair:${memberName}/${filePath}`);
-  vscode.workspace.openTextDocument(virtualUri).then(
-    (doc) => {
-      // Show with custom name
-      vscode.window.showTextDocument(doc, { preview: true });
-    },
-    () => {
-      // Fallback: show content in a new untitled document
-      vscode.workspace.openTextDocument({ content, language: getLanguageId(fileName) }).then((doc) => {
-        const editor = vscode.window.activeTextEditor;
-        if (editor) {
-          editor.edit((editBuilder) => {
-            editBuilder.insert(new vscode.Position(0, 0), content);
-          });
-        }
-        vscode.window.showTextDocument(doc, { preview: true, preserveFocus: true });
-      });
-    }
-  );
+  vscode.workspace.openTextDocument({ content, language: getLanguageId(fileName) }).then((doc) => {
+    vscode.window.showTextDocument(doc, { preview: true, preserveFocus: true });
+  });
 }
 
 function getLanguageId(fileName: string): string {
@@ -416,9 +476,10 @@ function getLanguageId(fileName: string): string {
 }
 
 export function deactivate() {
-  telebitTunnel?.stop();
-  telebitTunnel = null;
+  cfTunnel?.stop();
+  cfTunnel = null;
   socketClient?.disconnect();
   cursorManager?.dispose();
+  stopWorkspaceWatcher();
   stopServer();
 }

@@ -1,162 +1,69 @@
-import * as vscode from "vscode";
-import { spawn, ChildProcess } from "child_process";
-
-export class TelebitTunnel {
-  private process: ChildProcess | null = null;
+/**
+ * Cloudflare Quick Tunnel — fully automatic, zero-config public tunnelling.
+ *
+ * Uses Cloudflare's `trycloudflare.com` quick tunnels, which require no account,
+ * no authtoken, and no user interaction. The `cloudflared` binary ships with the
+ * npm package (downloaded on install) and is launched as a child process.
+ */
+export class CloudflareTunnel {
   private tunnelUrl: string | null = null;
-  private outputBuffer: string = "";
-  private onUrlReady: ((url: string) => void) | null = null;
-  private onError: ((err: Error) => void) | null = null;
+  private stopFn: (() => void) | null = null;
 
-  static async start(port: number): Promise<TelebitTunnel> {
-    const tunnel = new TelebitTunnel();
+  static async start(port: number): Promise<CloudflareTunnel> {
+    const tunnel = new CloudflareTunnel();
     await tunnel.init(port);
     return tunnel;
   }
 
-  private async init(port: number): Promise<void> {
-    const isInitialized = await this.checkInitialized();
-    if (!isInitialized) {
-      await this.autoInit();
+  private async init(port: number, timeoutMs = 30000): Promise<void> {
+    const { Tunnel, bin, install } = require("cloudflared");
+    const fs = require("fs");
+
+    // The binary normally ships with the package, but the bundled copy is
+    // platform-specific. Fetch the correct one on demand if it's missing.
+    if (!fs.existsSync(bin)) {
+      await install(bin);
     }
-    await this.startTunnel(port);
-  }
 
-  private runCommand(cmd: string, args: string[], timeoutMs: number = 15000): Promise<{ code: number; output: string }> {
-    return new Promise((resolve) => {
-      const proc = spawn(cmd, args, {
-        shell: true,
-        stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env, npm_config_yes: "true" },
-      });
+    // `Tunnel.quick` runs `cloudflared tunnel --url ...` — a quick tunnel that
+    // needs no Cloudflare account or token.
+    const t = Tunnel.quick(`http://localhost:${port}`);
+    this.stopFn = () => {
+      try { t.stop(); } catch { /* ignore */ }
+    };
 
-      let output = "";
-      proc.stdout?.on("data", (d: Buffer) => (output += d.toString()));
-      proc.stderr?.on("data", (d: Buffer) => (output += d.toString()));
-
+    await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
-        proc.kill();
-        resolve({ code: -1, output: output + "\n[timeout]" });
+        this.stopFn?.();
+        reject(new Error("cloudflared tunnel timed out"));
       }, timeoutMs);
 
-      proc.on("close", (code) => {
+      t.once("url", (url: string) => {
         clearTimeout(timer);
-        resolve({ code: code ?? -1, output });
-      });
-
-      proc.on("error", (err) => {
-        clearTimeout(timer);
-        resolve({ code: -1, output: err.message });
-      });
-    });
-  }
-
-  private async checkInitialized(): Promise<boolean> {
-    const { code, output } = await this.runCommand("npx", ["--yes", "telebit", "status"]);
-    return code === 0 && !output.includes("not found") && !output.includes("not initialized");
-  }
-
-  private async autoInit(): Promise<void> {
-    const email = await vscode.window.showInputBox({
-      prompt: "Telebit needs your email for a one-time setup (for certificate recovery & security alerts)",
-      placeHolder: "you@example.com",
-      validateInput: (v) => (v.includes("@") ? null : "Valid email required"),
-    });
-
-    if (!email) {
-      throw new Error("Telebit setup cancelled — email is required for tunneling");
-    }
-
-    const agreeTos = await vscode.window.showQuickPick(["Yes, I agree"], {
-      placeHolder: "Do you agree to the Telebit, Greenlock, and Let's Encrypt Terms of Service?",
-    });
-
-    if (!agreeTos) {
-      throw new Error("Telebit setup cancelled — TOS agreement required");
-    }
-
-    const { code, output } = await this.runCommand("npx", [
-      "--yes", "telebit", "init",
-      "--email", email,
-      "--agree-tos",
-      "--community-member",
-      "--telemetry",
-    ]);
-
-    if (code !== 0) {
-      throw new Error(`Telebit init failed: ${output.slice(0, 200)}`);
-    }
-
-    vscode.window.showInformationMessage("Telebit: Setup complete!");
-  }
-
-  private async startTunnel(port: number): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.onUrlReady = (url: string) => {
         this.tunnelUrl = url;
         resolve();
-      };
-      this.onError = (err: Error) => reject(err);
-
-      this.process = spawn("npx", ["--yes", "telebit", "http", String(port)], {
-        shell: true,
-        stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env, npm_config_yes: "true" },
       });
-
-      this.process.stdout?.on("data", (data: Buffer) => {
-        this.outputBuffer += data.toString();
-        this.parseOutput();
+      t.once("error", (err: Error) => {
+        clearTimeout(timer);
+        this.stopFn?.();
+        reject(err);
       });
-
-      this.process.stderr?.on("data", (data: Buffer) => {
-        this.outputBuffer += data.toString();
-        this.parseOutput();
-      });
-
-      this.process.on("error", (err) => {
-        if (this.onError) this.onError(err);
-      });
-
-      this.process.on("close", (code) => {
-        if (code !== null && code !== 0 && !this.tunnelUrl) {
-          if (this.onError) {
-            this.onError(new Error(`Telebit exited with code ${code}`));
-          }
-        }
-        this.process = null;
-      });
-
-      setTimeout(() => {
+      t.once("exit", (code: number | null) => {
+        clearTimeout(timer);
         if (!this.tunnelUrl) {
-          this.stop();
-          reject(new Error("Telebit tunnel timed out after 30s"));
+          reject(new Error(`cloudflared exited (code ${code}) before providing a URL`));
         }
-      }, 30000);
+      });
     });
-  }
-
-  private parseOutput(): void {
-    const match = this.outputBuffer.match(
-      /Forwarding\s+(\S+\.telebit\.cloud)\s*=>\s*localhost:\d+/
-    );
-    if (match && this.onUrlReady) {
-      const cb = this.onUrlReady;
-      this.onUrlReady = null;
-      cb(`https://${match[1]}`);
-    }
   }
 
   getUrl(): string | null {
     return this.tunnelUrl;
   }
 
-  stop(): void {
-    if (this.process) {
-      this.process.kill();
-      this.process = null;
-    }
+  async stop(): Promise<void> {
+    this.stopFn?.();
+    this.stopFn = null;
     this.tunnelUrl = null;
-    this.outputBuffer = "";
   }
 }

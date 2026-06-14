@@ -1,0 +1,18 @@
+# TypeScript source & build tooling — the runtime is bundled into dist/
+src/**
+build.js
+tsconfig.json
+**/*.ts
+**/*.map
+
+# Node modules: ship ONLY cloudflared (its binary powers the zero-config tunnel).
+# socket.io-client is already bundled into dist/extension.js by esbuild.
+node_modules/**
+!node_modules/cloudflared/**
+!node_modules/cloudflared
+
+# Repo / packaging artifacts
+.gitignore
+.vscodeignore
+.vscode/**
+**/*.vsix

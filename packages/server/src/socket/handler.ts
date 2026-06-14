@@ -8,6 +8,7 @@ interface MemberState {
   colour: string;
   activeFile: string;
   fileTree: any[];
+  role: "host" | "viewer";
 }
 
 interface RoomState {
@@ -15,6 +16,8 @@ interface RoomState {
   members: Map<string, MemberState>;
   socketToMember: Map<string, string>;
   memberSockets: Map<string, string>;
+  hostMemberId: string | null;
+  editPermissions: Set<string>;
 }
 
 export function setupSocketIO(io: SocketIOServer, stmts: any) {
@@ -27,6 +30,8 @@ export function setupSocketIO(io: SocketIOServer, stmts: any) {
         members: new Map(),
         socketToMember: new Map(),
         memberSockets: new Map(),
+        hostMemberId: null,
+        editPermissions: new Set(),
       });
     }
     return rooms.get(roomId)!;
@@ -74,13 +79,21 @@ export function setupSocketIO(io: SocketIOServer, stmts: any) {
     }
 
     if (!isDashboard) {
+      if (!state.hostMemberId || state.members.size === 0) {
+        state.hostMemberId = member.id;
+        state.editPermissions.add(member.id);
+      }
+
+      const role = member.id === state.hostMemberId ? "host" : "viewer";
       state.members.set(member.id, {
         memberId: member.id,
         displayName: member.display_name,
         colour: member.colour,
         activeFile: "",
         fileTree: [],
+        role,
       });
+      if (role === "host") state.editPermissions.add(member.id);
     }
     state.socketToMember.set(socket.id, member.id);
     if (!isDashboard) state.memberSockets.set(member.id, socket.id);
@@ -92,6 +105,7 @@ export function setupSocketIO(io: SocketIOServer, stmts: any) {
           memberId: m.memberId,
           displayName: m.displayName,
           colour: m.colour,
+          role: m.role,
         });
         // Send their file tree
         if (m.fileTree.length > 0) {
@@ -109,6 +123,7 @@ export function setupSocketIO(io: SocketIOServer, stmts: any) {
       memberId: member.id,
       displayName: member.display_name,
       colour: member.colour,
+      role: state.members.get(member.id)?.role || "viewer",
     });
 
     // Send current Y.js state
@@ -133,6 +148,10 @@ export function setupSocketIO(io: SocketIOServer, stmts: any) {
     // Handle raw text edit
     socket.on("code:edit", (data: { fileId: string; content: string }) => {
       if (typeof data.fileId !== "string" || typeof data.content !== "string") return;
+      if (!state.editPermissions.has(member.id)) {
+        socket.emit("edit:deny", { filePath: data.fileId, deniedBy: "Host" });
+        return;
+      }
 
       socket.to(roomId).emit("code:edit", {
         fileId: data.fileId,
@@ -144,6 +163,10 @@ export function setupSocketIO(io: SocketIOServer, stmts: any) {
     // Handle Y.js code delta
     socket.on("code:delta", (data: { fileId: string; update: string }) => {
       if (typeof data.fileId !== "string" || typeof data.update !== "string") return;
+      if (!state.editPermissions.has(member.id)) {
+        socket.emit("edit:deny", { filePath: data.fileId, deniedBy: "Host" });
+        return;
+      }
       try {
         const update = Buffer.from(data.update, "base64");
         Y.applyUpdate(state.ydoc, update);
@@ -204,9 +227,14 @@ export function setupSocketIO(io: SocketIOServer, stmts: any) {
 
     // Handle edit request — someone wants write access
     socket.on("edit:request", (data: { targetMemberId: string; filePath: string }) => {
-      if (typeof data.targetMemberId !== "string" || typeof data.filePath !== "string") return;
+      if (typeof data.filePath !== "string") return;
 
-      const targetSocketId = state.memberSockets.get(data.targetMemberId);
+      const targetMemberId = typeof data.targetMemberId === "string"
+        ? data.targetMemberId
+        : state.hostMemberId;
+      if (!targetMemberId) return;
+
+      const targetSocketId = state.memberSockets.get(targetMemberId);
       if (targetSocketId) {
         io.to(targetSocketId).emit("edit:request", {
           fromSocketId: socket.id,
@@ -220,6 +248,9 @@ export function setupSocketIO(io: SocketIOServer, stmts: any) {
     // Handle edit grant
     socket.on("edit:grant", (data: { targetSocketId: string; filePath: string }) => {
       if (typeof data.targetSocketId !== "string") return;
+      if (member.id !== state.hostMemberId) return;
+      const targetMemberId = state.socketToMember.get(data.targetSocketId);
+      if (targetMemberId) state.editPermissions.add(targetMemberId);
       io.to(data.targetSocketId).emit("edit:grant", {
         filePath: data.filePath,
         grantedBy: member.display_name,
@@ -229,6 +260,11 @@ export function setupSocketIO(io: SocketIOServer, stmts: any) {
     // Handle edit revoke
     socket.on("edit:revoke", (data: { targetSocketId: string; filePath: string }) => {
       if (typeof data.targetSocketId !== "string") return;
+      if (member.id !== state.hostMemberId) return;
+      const targetMemberId = state.socketToMember.get(data.targetSocketId);
+      if (targetMemberId && targetMemberId !== state.hostMemberId) {
+        state.editPermissions.delete(targetMemberId);
+      }
       io.to(data.targetSocketId).emit("edit:revoke", {
         filePath: data.filePath,
       });
@@ -279,6 +315,22 @@ export function setupSocketIO(io: SocketIOServer, stmts: any) {
         state.memberSockets.delete(memberId);
         if (!isDashboard) {
           state.members.delete(memberId);
+          if (memberId !== state.hostMemberId) {
+            state.editPermissions.delete(memberId);
+          } else {
+            const nextHost = state.members.values().next().value as MemberState | undefined;
+            state.hostMemberId = nextHost?.memberId || null;
+            if (nextHost) {
+              nextHost.role = "host";
+              state.editPermissions.add(nextHost.memberId);
+              io.to(roomId).emit("presence:join", {
+                memberId: nextHost.memberId,
+                displayName: nextHost.displayName,
+                colour: nextHost.colour,
+                role: "host",
+              });
+            }
+          }
           socket.to(roomId).emit("presence:leave", { memberId });
         }
       }

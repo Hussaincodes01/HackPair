@@ -30,7 +30,6 @@ export class CursorManager {
         backgroundColor: colour,
         color: "#fff",
         fontWeight: "bold",
-        fontSize: "10px",
         margin: "0 0 0 4px",
       },
     });

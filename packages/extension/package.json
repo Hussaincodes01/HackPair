@@ -2,53 +2,33 @@
   "name": "hackpair",
   "displayName": "HackPair",
   "description": "Real-time code collaboration. Connect to a HackPair server and code with your team.",
-  "version": "0.2.3",
+  "version": "0.2.5",
   "publisher": "Hussaincodes01",
   "icon": "icon.png",
   "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/Hussaincodes01/hackpair" },
   "engines": { "vscode": "^1.85.0" },
   "categories": ["Other"],
   "keywords": ["collaboration", "real-time", "hackathon", "live-share"],
   "activationEvents": [
-    "onCommand:hacksync.join",
-    "onCommand:hacksync.createRoom",
-    "onCommand:hacksync.leave"
+    "onView:hackpair.panel"
   ],
   "main": "./dist/extension.js",
   "contributes": {
-    "commands": [
-      { "command": "hacksync.join", "title": "HackPair: Join Room" },
-      { "command": "hacksync.createRoom", "title": "HackPair: Create Room" },
-      { "command": "hacksync.leave", "title": "HackPair: Leave Room" }
-    ],
     "viewsContainers": {
       "activitybar": [{ "id": "hacksync", "title": "HackPair", "icon": "$(sync)" }]
     },
     "views": {
       "hacksync": [{
         "type": "webview",
-        "id": "hacksync.panel",
+        "id": "hackpair.panel",
         "name": "HackPair"
       }]
-    },
-    "configuration": {
-      "title": "HackPair",
-      "properties": {
-        "hacksync.serverUrl": {
-          "type": "string",
-          "default": "",
-          "description": "Server URL (ask your team lead for this)"
-        },
-        "hacksync.displayName": {
-          "type": "string",
-          "default": "",
-          "description": "Your name shown to teammates"
-        }
-      }
     }
   },
   "scripts": {
-    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --minify"
+    "build": "node build.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@types/node": "^20.12.0",
@@ -57,6 +37,7 @@
     "typescript": "^5.4.0"
   },
   "dependencies": {
+    "cloudflared": "^0.7.1",
     "socket.io-client": "^4.7.0"
   }
 }

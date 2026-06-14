@@ -65,8 +65,16 @@ export class CollaborationSidebar implements vscode.WebviewViewProvider {
     this._view?.webview.postMessage({ type: "state", state: this._state });
   }
 
+  hasFileTree(memberId: string): boolean {
+    return Boolean(this._state.fileTrees[memberId]);
+  }
+
+  getHostMember(): any | null {
+    return this._state.members.find((m: any) => m.role === "host") || null;
+  }
+
   reset() {
-    this._state = { members: [], roomName: null, displayName: this._state.displayName, fileTrees: {}, selectedMember: null, viewingFile: null };
+    this._state = { members: [], roomName: null, displayName: this._state.displayName, fileTrees: {}, selectedMember: null, viewingFile: null, canEdit: false };
     this._view?.webview.postMessage({ type: "state", state: this._state });
   }
 
@@ -158,6 +166,8 @@ function render() {
           <button class="copy-btn" style="flex:1" onclick="copyInvite()">Copy Link</button>
           <button class="copy-btn" style="flex:1" onclick="copyCode()">Copy Code</button>
         </div>
+        \${state.role !== 'host' && !state.canEdit ? '<button class="btn bs" style="margin-top:8px" onclick="send({type:\\'requestEditAccess\\'})">Request Edit Access</button><div class="copy-hint">Read-only until the host grants edits.</div>' : ''}
+        \${state.role !== 'host' && state.canEdit ? '<div class="copy-hint">Edit access granted.</div>' : ''}
       </div>
       <hr class="divider">
       <div class="section" style="padding-bottom:4px">
@@ -171,7 +181,7 @@ function render() {
       \${state.members.map(m => \`
         <div class="member" onclick="send({type:'selectMember', memberId:'\${esc(m.memberId)}', name:'\${esc(m.displayName)}'})">
           <div class="dot" style="background:\${esc(m.colour || '#666')}"></div>
-          <div class="member-name">\${esc(m.displayName || 'Unknown')}</div>
+          <div class="member-name">\${esc(m.displayName || 'Unknown')} \${m.role === 'host' ? '<span class="you">host</span>' : ''}</div>
         </div>
       \`).join('')}
       \${state.members.length === 0 ? '<div class="status">Waiting for teammates...</div>' : ''}
