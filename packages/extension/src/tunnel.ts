@@ -22,34 +22,38 @@ export class TelebitTunnel {
     await this.startTunnel(port);
   }
 
-  private async checkInitialized(): Promise<boolean> {
+  private runCommand(cmd: string, args: string[], timeoutMs: number = 15000): Promise<{ code: number; output: string }> {
     return new Promise((resolve) => {
-      const proc = spawn("npx", ["telebit", "status"], {
+      const proc = spawn(cmd, args, {
         shell: true,
         stdio: ["pipe", "pipe", "pipe"],
+        env: { ...process.env, npm_config_yes: "true" },
       });
 
-      let stdout = "";
-      let stderr = "";
-      proc.stdout?.on("data", (d: Buffer) => (stdout += d.toString()));
-      proc.stderr?.on("data", (d: Buffer) => (stderr += d.toString()));
+      let output = "";
+      proc.stdout?.on("data", (d: Buffer) => (output += d.toString()));
+      proc.stderr?.on("data", (d: Buffer) => (output += d.toString()));
+
+      const timer = setTimeout(() => {
+        proc.kill();
+        resolve({ code: -1, output: output + "\n[timeout]" });
+      }, timeoutMs);
 
       proc.on("close", (code) => {
-        const output = stdout + stderr;
-        if (code === 0 && !output.includes("not found") && !output.includes("not initialized")) {
-          resolve(true);
-        } else {
-          resolve(false);
-        }
+        clearTimeout(timer);
+        resolve({ code: code ?? -1, output });
       });
 
-      proc.on("error", () => resolve(false));
-
-      setTimeout(() => {
-        proc.kill();
-        resolve(false);
-      }, 10000);
+      proc.on("error", (err) => {
+        clearTimeout(timer);
+        resolve({ code: -1, output: err.message });
+      });
     });
+  }
+
+  private async checkInitialized(): Promise<boolean> {
+    const { code, output } = await this.runCommand("npx", ["--yes", "telebit", "status"]);
+    return code === 0 && !output.includes("not found") && !output.includes("not initialized");
   }
 
   private async autoInit(): Promise<void> {
@@ -71,28 +75,19 @@ export class TelebitTunnel {
       throw new Error("Telebit setup cancelled — TOS agreement required");
     }
 
-    return new Promise((resolve, reject) => {
-      const proc = spawn(
-        "npx",
-        ["telebit", "init", "--email", email, "--agree-tos", "--community-member", "--telemetry"],
-        { shell: true, stdio: ["pipe", "pipe", "pipe"] }
-      );
+    const { code, output } = await this.runCommand("npx", [
+      "--yes", "telebit", "init",
+      "--email", email,
+      "--agree-tos",
+      "--community-member",
+      "--telemetry",
+    ]);
 
-      let output = "";
-      proc.stdout?.on("data", (d: Buffer) => (output += d.toString()));
-      proc.stderr?.on("data", (d: Buffer) => (output += d.toString()));
+    if (code !== 0) {
+      throw new Error(`Telebit init failed: ${output.slice(0, 200)}`);
+    }
 
-      proc.on("close", (code) => {
-        if (code === 0) {
-          vscode.window.showInformationMessage("Telebit: Setup complete!");
-          resolve();
-        } else {
-          reject(new Error(`Telebit init failed (code ${code}): ${output.slice(0, 200)}`));
-        }
-      });
-
-      proc.on("error", (err) => reject(new Error(`Telebit init error: ${err.message}`)));
-    });
+    vscode.window.showInformationMessage("Telebit: Setup complete!");
   }
 
   private async startTunnel(port: number): Promise<void> {
@@ -103,9 +98,10 @@ export class TelebitTunnel {
       };
       this.onError = (err: Error) => reject(err);
 
-      this.process = spawn("npx", ["telebit", "http", String(port)], {
+      this.process = spawn("npx", ["--yes", "telebit", "http", String(port)], {
         shell: true,
         stdio: ["pipe", "pipe", "pipe"],
+        env: { ...process.env, npm_config_yes: "true" },
       });
 
       this.process.stdout?.on("data", (data: Buffer) => {
