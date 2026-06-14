@@ -1,7 +1,7 @@
 {
   "name": "hackpair",
-  "displayName": "HackSync",
-  "description": "Real-time code collaboration. Connect to a HackSync server and code with your team.",
+  "displayName": "HackPair",
+  "description": "Real-time code collaboration. Connect to a HackPair server and code with your team.",
   "version": "0.2.1",
   "publisher": "Hussaincodes01",
   "icon": "icon.png",
@@ -17,22 +17,22 @@
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
-      { "command": "hacksync.join", "title": "HackSync: Join Room" },
-      { "command": "hacksync.createRoom", "title": "HackSync: Create Room" },
-      { "command": "hacksync.leave", "title": "HackSync: Leave Room" }
+      { "command": "hacksync.join", "title": "HackPair: Join Room" },
+      { "command": "hacksync.createRoom", "title": "HackPair: Create Room" },
+      { "command": "hacksync.leave", "title": "HackPair: Leave Room" }
     ],
     "viewsContainers": {
-      "activitybar": [{ "id": "hacksync", "title": "HackSync", "icon": "$(sync)" }]
+      "activitybar": [{ "id": "hacksync", "title": "HackPair", "icon": "$(sync)" }]
     },
     "views": {
       "hacksync": [{
         "type": "webview",
         "id": "hacksync.panel",
-        "name": "HackSync"
+        "name": "HackPair"
       }]
     },
     "configuration": {
-      "title": "HackSync",
+      "title": "HackPair",
       "properties": {
         "hacksync.serverUrl": {
           "type": "string",
