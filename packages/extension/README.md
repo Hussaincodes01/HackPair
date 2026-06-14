@@ -45,7 +45,7 @@ If you already have Telebit installed globally, it uses that. If not, `npx` hand
 - VS Code 1.85+
 - Node.js 18+
 
-## What's New in 0.2.2
+## What's New in 0.2.3
 
 - **Telebit tunneling** — Automatic public URLs for remote teams
 - **CORS hardened** — Blocked cross-origin abuse
