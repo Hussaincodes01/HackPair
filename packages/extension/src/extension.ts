@@ -35,39 +35,79 @@ function startServer(port: number = 3001): Promise<{ port: number; url: string }
     const { spawn } = require("child_process");
     const childEnv: Record<string, string> = { PORT: String(port) };
     for (const key of Object.keys(process.env)) {
-      if (key.startsWith("CLOUDFLARED_") || key === "NODE_ENV" || key === "HOME" || key === "USERPROFILE" || key === "PATH") {
+      if (key.startsWith("CLOUDFLARED_") || key === "NODE_ENV" || key === "HOME" || key === "USERPROFILE" || key === "PATH" || key === "APPDATA" || key === "SystemRoot" || key === "TEMP" || key === "TMP") {
         childEnv[key] = process.env[key]!;
       }
     }
+
+    killExistingServer();
     serverProcess = spawn(process.execPath, [serverPath], {
       env: childEnv,
       stdio: ["pipe", "pipe", "pipe"],
     });
 
-    let started = false;
+    let exitCode: number | null = null;
+    let errorOutput = "";
+    let seenStartup = false;
+    let stdoutBuffer = "";
+
     serverProcess.stdout?.on("data", (data: Buffer) => {
-      if (!started && (data.toString().includes("running at") || data.toString().includes("listening"))) {
-        started = true;
-        const ips = getLocalIPs();
-        const ip = ips[0] || "localhost";
-        resolve({ port, url: `http://${ip}:${port}` });
+      stdoutBuffer += data.toString();
+      if (stdoutBuffer.includes("running at") || stdoutBuffer.includes("listening")) {
+        seenStartup = true;
       }
     });
-    serverProcess.stderr?.on("data", (data: Buffer) => console.error("HackPair:", data.toString()));
-    serverProcess.on("error", (err: Error) => { if (!started) reject(err); });
-    serverProcess.on("exit", () => { serverProcess = null; });
-    setTimeout(() => {
-      if (!started) {
-        started = true;
+
+    serverProcess.stderr?.on("data", (data: Buffer) => {
+      errorOutput += data.toString();
+      console.error("HackPair:", data.toString());
+    });
+
+    serverProcess.on("error", (err: Error) => {
+      reject(new Error(`Failed to start server: ${err.message}`));
+    });
+
+    serverProcess.on("exit", (code) => {
+      exitCode = code;
+      if (code !== 0 && !seenStartup) {
+        reject(new Error(`Server exited unexpectedly (code ${code}). ${errorOutput.slice(0, 200)}`));
+      }
+      serverProcess = null;
+    });
+
+    const startTime = Date.now();
+    const poll = async () => {
+      if (seenStartup) {
         const ips = getLocalIPs();
         const ip = ips[0] || "localhost";
-        resolve({ port, url: `http://${ip}:${port}` });
+        const url = `http://${ip}:${port}`;
+        try {
+          const res = await fetch(`${url}/api/health`);
+          if (res.ok) return resolve({ port, url });
+        } catch {}
       }
-    }, 3000);
+      if (exitCode !== null && exitCode !== 0) return;
+      if (Date.now() - startTime > 8000) {
+        if (exitCode === 0 && seenStartup) {
+          const ips = getLocalIPs();
+          const ip = ips[0] || "localhost";
+          return resolve({ port, url: `http://${ip}:${port}` });
+        }
+        if (errorOutput) reject(new Error(`Server error: ${errorOutput.slice(0, 200)}`));
+        else reject(new Error("Server failed to start within 8 seconds. Try a different port or check if port 3001 is in use."));
+        return;
+      }
+      setTimeout(poll, 300);
+    };
+    poll();
   });
 }
 
 function stopServer() {
+  if (serverProcess) { serverProcess.kill(); serverProcess = null; }
+}
+
+function killExistingServer() {
   if (serverProcess) { serverProcess.kill(); serverProcess = null; }
 }
 
@@ -186,6 +226,7 @@ export function activate(ctx: vscode.ExtensionContext) {
 
         vscode.window.showInformationMessage(`HackPair: Room created! Share the invite link.`);
       } catch (err: any) {
+        stopServer();
         sidebar?.updateState({ connecting: false, error: err.message });
       }
     }

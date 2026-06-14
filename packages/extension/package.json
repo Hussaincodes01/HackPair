@@ -2,7 +2,7 @@
   "name": "hackpair",
   "displayName": "HackPair",
   "description": "Real-time code collaboration. Connect to a HackPair server and code with your team.",
-  "version": "0.2.5",
+  "version": "0.2.7",
   "publisher": "Hussaincodes01",
   "icon": "icon.png",
   "license": "MIT",
