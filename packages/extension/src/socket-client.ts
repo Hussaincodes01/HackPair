@@ -35,6 +35,22 @@ export class SocketClient {
     this.serverUrl = serverUrl.replace(/\/$/, "");
   }
 
+  private setupListeners(socket: any) {
+    socket.on("connect", () => this._onConnect.fire());
+    socket.on("disconnect", () => this._onDisconnect.fire());
+    socket.on("presence:join", (data: any) => this._onMemberJoin.fire(data));
+    socket.on("presence:leave", (data: any) => this._onMemberLeave.fire(data));
+    socket.on("cursor:move", (data: any) => this._onCursorUpdate.fire(data));
+    socket.on("code:edit", (data: any) => this._onCodeEdit.fire(data));
+    socket.on("workspace:sync", (data: any) => this._onWorkspaceSync.fire(data));
+    socket.on("file:request", (data: any) => this._onFileRequest.fire(data));
+    socket.on("file:content", (data: any) => this._onFileContent.fire(data));
+    socket.on("edit:request", (data: any) => this._onEditRequest.fire(data));
+    socket.on("edit:grant", (data: any) => this._onEditGrant.fire(data));
+    socket.on("edit:revoke", (data: any) => this._onEditRevoke.fire(data));
+    socket.on("edit:deny", (data: any) => this._onEditDeny.fire(data));
+  }
+
   async connect() {
     try {
       const { io } = require("socket.io-client");
@@ -44,26 +60,7 @@ export class SocketClient {
         reconnectionDelay: 1000,
         reconnectionAttempts: 10,
       });
-
-      this.socket.on("connect", () => {
-        this._onConnect.fire();
-      });
-
-      this.socket.on("disconnect", () => {
-        this._onDisconnect.fire();
-      });
-
-      this.socket.on("presence:join", (data: any) => this._onMemberJoin.fire(data));
-      this.socket.on("presence:leave", (data: any) => this._onMemberLeave.fire(data));
-      this.socket.on("cursor:move", (data: any) => this._onCursorUpdate.fire(data));
-      this.socket.on("code:edit", (data: any) => this._onCodeEdit.fire(data));
-      this.socket.on("workspace:sync", (data: any) => this._onWorkspaceSync.fire(data));
-      this.socket.on("file:request", (data: any) => this._onFileRequest.fire(data));
-      this.socket.on("file:content", (data: any) => this._onFileContent.fire(data));
-      this.socket.on("edit:request", (data: any) => this._onEditRequest.fire(data));
-      this.socket.on("edit:grant", (data: any) => this._onEditGrant.fire(data));
-      this.socket.on("edit:revoke", (data: any) => this._onEditRevoke.fire(data));
-      this.socket.on("edit:deny", (data: any) => this._onEditDeny.fire(data));
+      this.setupListeners(this.socket);
     } catch (err) {
       console.error("HackPair: failed to connect", err);
     }
@@ -71,6 +68,7 @@ export class SocketClient {
 
   connectToRoom(roomId: string, token: string) {
     if (!this.socket) return;
+    this.socket.removeAllListeners();
     this.socket.disconnect();
     const { io } = require("socket.io-client");
     this.socket = io(this.serverUrl, {
@@ -80,20 +78,7 @@ export class SocketClient {
       reconnectionDelay: 1000,
       reconnectionAttempts: 10,
     });
-
-    this.socket.on("connect", () => this._onConnect.fire());
-    this.socket.on("disconnect", () => this._onDisconnect.fire());
-    this.socket.on("presence:join", (data: any) => this._onMemberJoin.fire(data));
-    this.socket.on("presence:leave", (data: any) => this._onMemberLeave.fire(data));
-    this.socket.on("cursor:move", (data: any) => this._onCursorUpdate.fire(data));
-    this.socket.on("code:edit", (data: any) => this._onCodeEdit.fire(data));
-    this.socket.on("workspace:sync", (data: any) => this._onWorkspaceSync.fire(data));
-    this.socket.on("file:request", (data: any) => this._onFileRequest.fire(data));
-    this.socket.on("file:content", (data: any) => this._onFileContent.fire(data));
-    this.socket.on("edit:request", (data: any) => this._onEditRequest.fire(data));
-    this.socket.on("edit:grant", (data: any) => this._onEditGrant.fire(data));
-    this.socket.on("edit:revoke", (data: any) => this._onEditRevoke.fire(data));
-    this.socket.on("edit:deny", (data: any) => this._onEditDeny.fire(data));
+    this.setupListeners(this.socket);
   }
 
   disconnect() {

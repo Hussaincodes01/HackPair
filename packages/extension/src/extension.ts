@@ -4,12 +4,14 @@ import * as os from "os";
 import { SocketClient } from "./socket-client";
 import { CollaborationSidebar } from "./sidebar";
 import { CursorManager } from "./cursor-manager";
+import { TelebitTunnel } from "./tunnel";
 import { scanWorkspace, readFileContent, watchWorkspace, FileTreeItem } from "./workspace";
 
 let socketClient: SocketClient | null = null;
 let sidebar: CollaborationSidebar | null = null;
 let cursorManager: CursorManager | null = null;
 let serverProcess: any = null;
+let telebitTunnel: TelebitTunnel | null = null;
 let extContext: vscode.ExtensionContext;
 let workspaceFolder: string = "";
 let fileContents: Map<string, string> = new Map();
@@ -29,8 +31,14 @@ function startServer(port: number = 3001): Promise<{ port: number; url: string }
   return new Promise((resolve, reject) => {
     const serverPath = path.join(extContext.extensionPath, "dist", "server.js");
     const { spawn } = require("child_process");
+    const childEnv: Record<string, string> = { PORT: String(port) };
+    for (const key of Object.keys(process.env)) {
+      if (key.startsWith("TELEBIT_") || key === "NODE_ENV" || key === "HOME" || key === "USERPROFILE" || key === "PATH") {
+        childEnv[key] = process.env[key]!;
+      }
+    }
     serverProcess = spawn(process.execPath, [serverPath], {
-      env: { ...process.env, PORT: String(port) },
+      env: childEnv,
       stdio: ["pipe", "pipe", "pipe"],
     });
 
@@ -104,12 +112,27 @@ export function activate(ctx: vscode.ExtensionContext) {
 
       sidebar?.updateState({ connecting: true, error: "" });
       try {
-        const { url } = await startServer();
-        const res = await fetch(`${url}/api/rooms`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: `${displayName}'s Room` }) });
+        const { url: localUrl } = await startServer();
+        const port = 3001;
+
+        let shareUrl = localUrl;
+        try {
+          telebitTunnel = await TelebitTunnel.start(port);
+          const tunnelUrl = telebitTunnel.getUrl();
+          if (tunnelUrl) {
+            shareUrl = tunnelUrl;
+            vscode.window.showInformationMessage(`HackPair: Tunnel active at ${tunnelUrl}`);
+          }
+        } catch (tunnelErr: any) {
+          console.warn("HackPair: Telebit tunnel failed, using local URL:", tunnelErr.message);
+          vscode.window.showWarningMessage(`HackPair: Tunnel unavailable (${tunnelErr.message}). Using local IP.`);
+        }
+
+        const res = await fetch(`${localUrl}/api/rooms`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: `${displayName}'s Room` }) });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const room = await res.json();
 
-        const joinRes = await fetch(`${url}/api/rooms/${room.id}/join`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ displayName }) });
+        const joinRes = await fetch(`${localUrl}/api/rooms/${room.id}/join`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ displayName }) });
         if (!joinRes.ok) throw new Error("Failed to join");
         const joinData = await joinRes.json();
 
@@ -117,11 +140,11 @@ export function activate(ctx: vscode.ExtensionContext) {
         await ctx.globalState.update("hackpair.token", joinData.token);
         await ctx.globalState.update("hackpair.roomName", room.name);
         await ctx.globalState.update("hackpair.inviteCode", room.inviteCode);
-        await ctx.globalState.update("hackpair.serverUrl", url);
-        const inviteUrl = `${url}?room=${room.inviteCode}`;
+        await ctx.globalState.update("hackpair.serverUrl", localUrl);
+        const inviteUrl = `${shareUrl}?room=${room.inviteCode}`;
         await ctx.globalState.update("hackpair.inviteUrl", inviteUrl);
 
-        connectToServer(url, ctx, room.id, joinData.token);
+        connectToServer(localUrl, ctx, room.id, joinData.token);
 
         sidebar?.updateState({ roomName: room.name, inviteCode: room.inviteCode, inviteUrl, memberId: joinData.memberId, displayName, connected: true, connecting: false });
 
@@ -241,6 +264,8 @@ export function activate(ctx: vscode.ExtensionContext) {
     }
 
     if (msg.type === "leave") {
+      telebitTunnel?.stop();
+      telebitTunnel = null;
       ctx.globalState.update("hackpair.roomId", undefined);
       ctx.globalState.update("hackpair.token", undefined);
       ctx.globalState.update("hackpair.roomName", undefined);
@@ -391,6 +416,8 @@ function getLanguageId(fileName: string): string {
 }
 
 export function deactivate() {
+  telebitTunnel?.stop();
+  telebitTunnel = null;
   socketClient?.disconnect();
   cursorManager?.dispose();
   stopServer();

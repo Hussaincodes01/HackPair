@@ -31,7 +31,23 @@ async function main() {
   });
 
   await app.register(cors, {
-    origin: true,
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      try {
+        const url = new URL(origin);
+        const host = url.hostname;
+        if (
+          host === "localhost" ||
+          host === "127.0.0.1" ||
+          /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) ||
+          host.endsWith(".telebit.cloud") ||
+          host.endsWith(".telebit.local")
+        ) {
+          return callback(null, true);
+        }
+      } catch {}
+      callback(null, false);
+    },
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization"],
   });
@@ -41,7 +57,26 @@ async function main() {
   const address = await app.listen({ port: PORT, host: HOST });
 
   const io = new SocketIOServer(app.server, {
-    cors: { origin: true, methods: ["GET", "POST"] },
+    cors: {
+      origin: (origin, callback) => {
+        if (!origin) return callback(null, true);
+        try {
+          const url = new URL(origin);
+          const host = url.hostname;
+          if (
+            host === "localhost" ||
+            host === "127.0.0.1" ||
+            /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) ||
+            host.endsWith(".telebit.cloud") ||
+            host.endsWith(".telebit.local")
+          ) {
+            return callback(null, true);
+          }
+        } catch {}
+        callback(null, false);
+      },
+      methods: ["GET", "POST"],
+    },
     transports: ["websocket", "polling"],
   });
 

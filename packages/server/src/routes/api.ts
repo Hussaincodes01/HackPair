@@ -9,10 +9,16 @@ const MEMBER_COLORS = [
 
 function generateInviteCode(): string {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  const bytes = randomBytes(6);
+  const maxValid = 252; // 256 - (256 % 36) = 252, ensures uniform distribution
+  const bytes = randomBytes(12); // fetch extra for rejection sampling
   let code = "";
-  for (let i = 0; i < 6; i++) {
-    code += chars[bytes[i] % chars.length];
+  let i = 0;
+  while (code.length < 6) {
+    if (i >= bytes.length) break;
+    if (bytes[i] < maxValid) {
+      code += chars[bytes[i] % chars.length];
+    }
+    i++;
   }
   return code;
 }
