@@ -36,6 +36,10 @@
     .invite { font-family: monospace; font-size: 16px; color: #3fb950; background: #0d1117; padding: 12px; border-radius: 6px; border: 1px solid #30363d; text-align: center; cursor: pointer; margin-top: 12px; word-break: break-all; }
     .invite:hover { border-color: #3fb950; }
     .copied { color: #3fb950; font-size: 12px; text-align: center; margin-top: 8px; display: none; }
+    .tunnel-url { font-family: monospace; font-size: 14px; color: #58a6ff; background: #0d1117; padding: 12px; border-radius: 6px; border: 1px solid #30363d; text-align: center; margin-top: 12px; word-break: break-all; }
+    .progress-bar { background: #21262d; border-radius: 4px; height: 8px; margin-top: 8px; }
+    .progress-fill { background: #3fb950; height: 100%; border-radius: 4px; transition: width 0.3s; }
+    .agent-report { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 12px; margin-top: 8px; font-family: monospace; font-size: 12px; white-space: pre-wrap; }
   </style>
 </head>
 <body>
@@ -67,12 +71,33 @@
         <div class="copied" id="copied">Copied to clipboard!</div>
       </div>
     </div>
+    <div class="grid">
+      <div class="card">
+        <h2>Public Tunnel</h2>
+        <div id="tunnelSection">
+          <div class="empty">Connecting to tunnel...</div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Team Progress</h2>
+        <div id="progressSection">
+          <div class="empty">No progress data</div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Agent Reports</h2>
+        <div id="agentReports">
+          <div class="empty">No reports yet</div>
+        </div>
+      </div>
+    </div>
     <div class="grid" style="grid-template-columns: 1fr 1fr 1fr;">
       <div class="card"><div class="stat"><div class="number" id="statRooms">0</div><div class="label">Active Rooms</div></div></div>
       <div class="card"><div class="stat"><div class="number" id="statMembers">0</div><div class="label">Online Members</div></div></div>
       <div class="card"><div class="stat"><div class="number" id="statEvents">0</div><div class="label">Events Today</div></div></div>
     </div>
   </div>
+  <script src="/socket.io/socket.io.js"></script>
   <script>
     const API = window.location.origin;
     let allRooms = [];
@@ -86,6 +111,10 @@
         allRooms = rooms;
         renderRooms();
         document.getElementById('statRooms').textContent = rooms.length;
+        // Observe every known room so we receive live presence/event broadcasts.
+        if (typeof socket !== 'undefined' && socket.connected) {
+          rooms.forEach(r => socket.emit('dashboard:observe', r.id));
+        }
       } catch(e) { console.error(e); }
     }
 
@@ -99,7 +128,11 @@
     function renderRooms() {
       const el = document.getElementById('rooms');
       if (allRooms.length === 0) { el.innerHTML = '<div class="empty">No active rooms</div>'; return; }
-      el.innerHTML = allRooms.map(r => '<div class="room"><div><div class="room-name">' + esc(r.name) + '</div><div class="room-meta">' + (r.members?.length || 0) + ' members</div></div><div class="room-code">' + esc(r.inviteCode) + '</div></div>').join('');
+      el.innerHTML = allRooms.map(r => {
+        // listRooms() returns invite_code (snake_case from SQL), normalise to camelCase
+        const code = r.inviteCode || r.invite_code || '';
+        return '<div class="room"><div><div class="room-name">' + esc(r.name) + '</div><div class="room-meta">' + (r.member_count || 0) + ' members</div></div><div class="room-code">' + esc(code) + '</div></div>';
+      }).join('');
     }
 
     async function fetchMembers() {
@@ -130,7 +163,7 @@
           if (data?.events) events.push(...data.events.map(e => ({ ...e, roomName: room.name })));
         } catch(e) {}
       }
-      events.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+      events.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
       eventCount = events.length;
       document.getElementById('statEvents').textContent = eventCount;
       renderActivity(events.slice(0, 20));
@@ -139,14 +172,65 @@
     function renderActivity(events) {
       const el = document.getElementById('activity');
       if (events.length === 0) { el.innerHTML = '<div class="empty">No activity yet</div>'; return; }
-      el.innerHTML = events.map(e => '<div class="activity"><span class="time">' + new Date(e.timestamp).toLocaleTimeString() + '</span><span class="event">' + esc(e.type) + '</span> <span class="file">' + esc(e.filePath || '') + '</span></div>').join('');
+      el.innerHTML = events.map(e => '<div class="activity"><span class="time">' + new Date(e.createdAt).toLocaleTimeString() + '</span><span class="event">' + esc(e.type) + '</span> <span class="file">' + esc(e.filePath || '') + '</span></div>').join('');
     }
 
     function renderInvite() {
       if (allRooms.length === 0) { return; }
       const r = allRooms[0];
-      const url = window.location.origin + '?room=' + r.inviteCode;
+      const code = r.inviteCode || r.invite_code || '';
+      const url = window.location.origin + '?room=' + code;
       document.getElementById('inviteSection').innerHTML = '<div style="font-size:12px;color:#8b949e;margin-bottom:8px">Share this link:</div><div class="invite" onclick="copyInvite(this, \'' + url + '\')">' + esc(url) + '</div>';
+    }
+
+    function renderTunnel() {
+      // Show the current URL as the tunnel URL
+      const url = window.location.origin;
+      document.getElementById('tunnelSection').innerHTML = '<div style="font-size:12px;color:#8b949e;margin-bottom:8px">Public URL:</div><div class="tunnel-url">' + esc(url) + '</div><div style="font-size:11px;color:#8b949e;margin-top:8px">Share this URL with remote teammates</div>';
+    }
+
+    async function fetchProgress() {
+      for (const room of allRooms) {
+        try {
+          const res = await fetch(API + '/api/rooms/' + room.id + '/progress');
+          const data = await res.json();
+          if (data?.progress && data.progress.length > 0) {
+            renderProgress(data.progress);
+            return;
+          }
+        } catch(e) {}
+      }
+      document.getElementById('progressSection').innerHTML = '<div class="empty">No progress data</div>';
+    }
+
+    function renderProgress(progress) {
+      const el = document.getElementById('progressSection');
+      el.innerHTML = progress.map(p => {
+        const pct = p.percentage || 0;
+        return '<div style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;font-size:13px"><span>' + esc(p.displayName || 'Unknown') + '</span><span>' + pct + '%</span></div><div class="progress-bar"><div class="progress-fill" style="width:' + pct + '%"></div></div></div>';
+      }).join('');
+    }
+
+    async function fetchAgentReports() {
+      for (const room of allRooms) {
+        try {
+          const res = await fetch(API + '/api/rooms/' + room.id + '/agents/reports');
+          const data = await res.json();
+          if (data?.reports && data.reports.length > 0) {
+            renderAgentReports(data.reports);
+            return;
+          }
+        } catch(e) {}
+      }
+      document.getElementById('agentReports').innerHTML = '<div class="empty">No reports yet</div>';
+    }
+
+    function renderAgentReports(reports) {
+      const el = document.getElementById('agentReports');
+      el.innerHTML = reports.map(r => {
+        const time = new Date(r.createdAt).toLocaleString();
+        return '<div class="agent-report"><div style="color:#8b949e;font-size:11px;margin-bottom:4px">' + esc(r.agentType) + ' · ' + time + '</div><div>' + esc(r.outputText) + '</div></div>';
+      }).join('');
     }
 
     function copyInvite(el, url) {
@@ -157,11 +241,41 @@
 
     function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
+    // Socket.IO for real-time updates
+    const socket = io(window.location.origin, { transports: ['websocket', 'polling'] });
+
+    socket.on('connect', () => {
+      console.log('Dashboard connected to server');
+      refresh();
+    });
+
+    socket.on('disconnect', () => {
+      document.getElementById('status').textContent = 'Disconnected';
+    });
+
+    socket.on('presence:join', (data) => {
+      console.log('Member joined:', data.displayName);
+      refresh();
+    });
+
+    socket.on('presence:leave', (data) => {
+      console.log('Member left:', data.memberId);
+      refresh();
+    });
+
+    socket.on('event:log', (data) => {
+      console.log('Event:', data.type, data.fileId);
+      refresh();
+    });
+
     async function refresh() {
       await fetchRooms();
       await fetchMembers();
       await fetchActivity();
       renderInvite();
+      renderTunnel();
+      await fetchProgress();
+      await fetchAgentReports();
       document.getElementById('status').textContent = 'Connected · ' + allRooms.length + ' rooms · ' + allMembers.length + ' members';
     }
 

@@ -3,6 +3,7 @@ import * as vscode from "vscode";
 export class CollaborationSidebar implements vscode.WebviewViewProvider {
   public static readonly viewType = "hackpair.panel";
   private _view?: vscode.WebviewView;
+  private _pendingMessages: any[] = [];
   private _state: any = {
     members: [],
     roomName: null,
@@ -18,6 +19,14 @@ export class CollaborationSidebar implements vscode.WebviewViewProvider {
     private readonly _extensionUri: vscode.Uri,
     private readonly _globalState: vscode.Memento
   ) {}
+
+  private _post(msg: any) {
+    if (this._view) {
+      this._view.webview.postMessage(msg);
+    } else {
+      this._pendingMessages.push(msg);
+    }
+  }
 
   resolveWebviewView(webviewView: vscode.WebviewView) {
     this._view = webviewView;
@@ -38,17 +47,23 @@ export class CollaborationSidebar implements vscode.WebviewViewProvider {
 
     webviewView.webview.html = this.getHtml();
     webviewView.webview.onDidReceiveMessage((msg) => this._onMsg.fire(msg));
+
+    // Flush any pending state messages that arrived before webview was ready
+    for (const msg of this._pendingMessages) {
+      this._view.webview.postMessage(msg);
+    }
+    this._pendingMessages = [];
   }
 
   updateState(partial: any) {
     Object.assign(this._state, partial);
-    this._view?.webview.postMessage({ type: "state", state: this._state });
+    this._post({ type: "state", state: this._state });
   }
 
   addMember(member: any) {
     if (!this._state.members.find((m: any) => m.memberId === member.memberId)) {
       this._state.members.push(member);
-      this._view?.webview.postMessage({ type: "state", state: this._state });
+      this._post({ type: "state", state: this._state });
     }
   }
 
@@ -57,12 +72,12 @@ export class CollaborationSidebar implements vscode.WebviewViewProvider {
     if (this._state.selectedMember === memberId) {
       this._state.selectedMember = null;
     }
-    this._view?.webview.postMessage({ type: "state", state: this._state });
+    this._post({ type: "state", state: this._state });
   }
 
   updateFileTree(memberId: string, fileTree: any) {
     this._state.fileTrees[memberId] = fileTree;
-    this._view?.webview.postMessage({ type: "state", state: this._state });
+    this._post({ type: "state", state: this._state });
   }
 
   hasFileTree(memberId: string): boolean {
@@ -75,7 +90,7 @@ export class CollaborationSidebar implements vscode.WebviewViewProvider {
 
   reset() {
     this._state = { members: [], roomName: null, displayName: this._state.displayName, fileTrees: {}, selectedMember: null, viewingFile: null, canEdit: false };
-    this._view?.webview.postMessage({ type: "state", state: this._state });
+    this._post({ type: "state", state: this._state });
   }
 
   private getHtml(): string {
@@ -133,6 +148,7 @@ let state = ${JSON.stringify(this._state)};
 
 function send(msg) { vscode.postMessage(msg); }
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function escAttr(s) { return esc(s).replace(/"/g, '&quot;'); }
 
 function render() {
   const app = document.getElementById('app');
@@ -146,40 +162,49 @@ function render() {
 
     app.innerHTML = \`
       <div class="tree-header">
-        <span class="back" onclick="send({type:'deselectMember'})">\\u2190 Back</span>
+        <span class="back" id="backBtn">\\u2190 Back</span>
         <span>\${esc(state.selectedMemberName || 'Unknown')}</span>
-        <button class="copy-btn" id="copyTreeBtn" onclick="copyAllFiles()">Copy All</button>
+        <button class="copy-btn" id="copyTreeBtn">Copy All</button>
       </div>
       <div class="file-tree">\${treeHtml || '<div class="status">No files shared yet</div>'}</div>
     \`;
+
+    document.getElementById('backBtn')?.addEventListener('click', () => send({ type: 'deselectMember' }));
+    document.getElementById('copyTreeBtn')?.addEventListener('click', copyAllFiles);
+
+    document.querySelectorAll('.tree-item.file[data-path]').forEach(el => {
+      el.addEventListener('click', () => {
+        send({ type: 'openFile', path: el.getAttribute('data-path'), memberId: state.selectedMember });
+      });
+    });
     return;
   }
 
   // STATE 2: In a room — show invite + members
   if (state.roomName) {
-    const inviteUrl = state.inviteUrl || '';
+      const inviteUrl = state.inviteUrl || '';
     app.innerHTML = \`
       <div class="section">
         <div class="room-name">\${esc(state.roomName)}</div>
         <div class="invite-url" id="inviteUrl" title="Click to copy invite link">\${esc(inviteUrl)}</div>
         <div style="display:flex;gap:4px;margin-top:6px">
-          <button class="copy-btn" style="flex:1" onclick="copyInvite()">Copy Link</button>
-          <button class="copy-btn" style="flex:1" onclick="copyCode()">Copy Code</button>
+          <button class="copy-btn" style="flex:1" id="copyLinkBtn">Copy Link</button>
+          <button class="copy-btn" style="flex:1" id="copyCodeBtn">Copy Code</button>
         </div>
-        \${state.role !== 'host' && !state.canEdit ? '<button class="btn bs" style="margin-top:8px" onclick="send({type:\\'requestEditAccess\\'})">Request Edit Access</button><div class="copy-hint">Read-only until the host grants edits.</div>' : ''}
+        \${state.role !== 'host' && !state.canEdit ? '<button class="btn bs" style="margin-top:8px" id="requestEditBtn">Request Edit Access</button><div class="copy-hint">Read-only until the host grants edits.</div>' : ''}
         \${state.role !== 'host' && state.canEdit ? '<div class="copy-hint">Edit access granted.</div>' : ''}
       </div>
       <hr class="divider">
       <div class="section" style="padding-bottom:4px">
         <div class="label">Team (\${state.members.length + 1})</div>
       </div>
-      <div class="member selected" onclick="send({type:'selectMember', memberId:'self', name:'\${esc(state.displayName || 'You')}'})">
+      <div class="member selected" id="selfMember">
         <div class="dot" style="background:#3B82F6"></div>
         <div class="member-name">\${esc(state.displayName || 'You')}</div>
         <div class="you">you</div>
       </div>
-      \${state.members.map(m => \`
-        <div class="member" onclick="send({type:'selectMember', memberId:'\${esc(m.memberId)}', name:'\${esc(m.displayName)}'})">
+      \${state.members.map((m, i) => \`
+        <div class="member" data-member-id="\${esc(m.memberId)}" data-name="\${esc(m.displayName)}">
           <div class="dot" style="background:\${esc(m.colour || '#666')}"></div>
           <div class="member-name">\${esc(m.displayName || 'Unknown')} \${m.role === 'host' ? '<span class="you">host</span>' : ''}</div>
         </div>
@@ -187,18 +212,35 @@ function render() {
       \${state.members.length === 0 ? '<div class="status">Waiting for teammates...</div>' : ''}
       <hr class="divider">
       <div class="section">
-        <button class="btn bd" onclick="send({type:'leave'})">Leave Room</button>
+        <button class="btn bd" id="leaveBtn">Leave Room</button>
       </div>
     \`;
 
-    document.getElementById('inviteUrl')?.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      navigator.clipboard.writeText(inviteUrl);
-      vscode.postMessage({ type: 'copyInvite', url: inviteUrl });
-      const el = document.getElementById('inviteUrl');
-      el.style.borderColor = 'var(--vscode-terminal-ansiGreen)';
-      setTimeout(() => el.style.borderColor = '', 1500);
+    document.getElementById('copyLinkBtn')?.addEventListener('click', () => {
+      try { navigator.clipboard.writeText(inviteUrl); } catch {}
+      send({ type: 'copyInvite', url: inviteUrl });
+    });
+
+    document.getElementById('copyCodeBtn')?.addEventListener('click', () => {
+      try { navigator.clipboard.writeText(state.inviteCode || ''); } catch {}
+    });
+
+    document.getElementById('leaveBtn')?.addEventListener('click', () => {
+      send({ type: 'leave' });
+    });
+
+    document.getElementById('requestEditBtn')?.addEventListener('click', () => {
+      send({ type: 'requestEditAccess' });
+    });
+
+    document.getElementById('selfMember')?.addEventListener('click', () => {
+      send({ type: 'selectMember', memberId: 'self', name: state.displayName || 'You' });
+    });
+
+    document.querySelectorAll('.member[data-member-id]').forEach(el => {
+      el.addEventListener('click', () => {
+        send({ type: 'selectMember', memberId: el.getAttribute('data-member-id'), name: el.getAttribute('data-name') });
+      });
     });
     return;
   }
@@ -241,28 +283,15 @@ function render() {
 
 function renderFileTree(items, depth) {
   if (!items || items.length === 0) return '';
-  return items.map(item => {
+    return items.map(item => {
     const indent = 'padding-left:' + (12 + depth * 16) + 'px';
     if (item.type === 'directory') {
       const children = renderFileTree(item.children, depth + 1);
       return '<div class="tree-item dir" style="' + indent + '"><span class="icon">\\uD83D\\uDCC1</span><span class="name">' + esc(item.name) + '</span></div>' + children;
     }
-    return '<div class="tree-item file" style="' + indent + '" onclick="openFile(\\'' + esc(item.path) + '\\')"><span class="icon">\\uD83D\uDCC4</span><span class="name">' + esc(item.name) + '</span></div>';
+    const pathAttr = escAttr(item.path);
+    return '<div class="tree-item file" style="' + indent + '" data-path="' + pathAttr + '"><span class="icon">\\uD83D\uDCC4</span><span class="name">' + esc(item.name) + '</span></div>';
   }).join('');
-}
-
-function openFile(path) {
-  send({ type: 'openFile', path: path, memberId: state.selectedMember });
-}
-
-function copyInvite() {
-  navigator.clipboard.writeText(state.inviteUrl || '');
-  vscode.postMessage({ type: 'copyInvite', url: state.inviteUrl });
-}
-
-function copyCode() {
-  const code = state.inviteCode || '';
-  navigator.clipboard.writeText(code);
 }
 
 function copyAllFiles() {

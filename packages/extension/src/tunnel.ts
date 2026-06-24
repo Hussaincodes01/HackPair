@@ -1,10 +1,5 @@
-/**
- * Cloudflare Quick Tunnel — fully automatic, zero-config public tunnelling.
- *
- * Uses Cloudflare's `trycloudflare.com` quick tunnels, which require no account,
- * no authtoken, and no user interaction. The `cloudflared` binary ships with the
- * npm package (downloaded on install) and is launched as a child process.
- */
+import * as vscode from "vscode";
+
 export class CloudflareTunnel {
   private tunnelUrl: string | null = null;
   private stopFn: (() => void) | null = null;
@@ -16,18 +11,25 @@ export class CloudflareTunnel {
   }
 
   private async init(port: number, timeoutMs = 30000): Promise<void> {
-    const { Tunnel, bin, install } = require("cloudflared");
-    const fs = require("fs");
-
-    // The binary normally ships with the package, but the bundled copy is
-    // platform-specific. Fetch the correct one on demand if it's missing.
-    if (!fs.existsSync(bin)) {
-      await install(bin);
+    let Cloudflared: any;
+    try {
+      Cloudflared = require("cloudflared");
+    } catch {
+      throw new Error("cloudflared package not found. Reinstall the extension.");
     }
 
-    // `Tunnel.quick` runs `cloudflared tunnel --url ...` — a quick tunnel that
-    // needs no Cloudflare account or token.
-    const t = Tunnel.quick(`http://localhost:${port}`);
+    const fs = require("fs");
+
+    if (!fs.existsSync(Cloudflared.bin)) {
+      vscode.window.showInformationMessage("HackPair: Downloading Cloudflare tunnel binary (one-time)...");
+      try {
+        await Cloudflared.install(Cloudflared.bin);
+      } catch (err: any) {
+        throw new Error(`Failed to download tunnel binary: ${err.message}`);
+      }
+    }
+
+    const t = Cloudflared.Tunnel.quick(`http://localhost:${port}`);
     this.stopFn = () => {
       try { t.stop(); } catch { /* ignore */ }
     };
@@ -35,7 +37,7 @@ export class CloudflareTunnel {
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.stopFn?.();
-        reject(new Error("cloudflared tunnel timed out"));
+        reject(new Error("cloudflared tunnel timed out (30s). Check your internet connection or firewall."));
       }, timeoutMs);
 
       t.once("url", (url: string) => {
@@ -46,7 +48,7 @@ export class CloudflareTunnel {
       t.once("error", (err: Error) => {
         clearTimeout(timer);
         this.stopFn?.();
-        reject(err);
+        reject(new Error(`Cloudflare tunnel error: ${err.message}`));
       });
       t.once("exit", (code: number | null) => {
         clearTimeout(timer);

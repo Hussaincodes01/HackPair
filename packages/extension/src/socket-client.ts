@@ -16,6 +16,8 @@ export class SocketClient {
   private _onEditGrant = new vscode.EventEmitter<any>();
   private _onEditRevoke = new vscode.EventEmitter<any>();
   private _onEditDeny = new vscode.EventEmitter<any>();
+  private _onCodeSync = new vscode.EventEmitter<any>();
+  private _onCodeDelta = new vscode.EventEmitter<any>();
 
   public readonly onConnect = this._onConnect.event;
   public readonly onDisconnect = this._onDisconnect.event;
@@ -30,10 +32,17 @@ export class SocketClient {
   public readonly onEditGrant = this._onEditGrant.event;
   public readonly onEditRevoke = this._onEditRevoke.event;
   public readonly onEditDeny = this._onEditDeny.event;
+  public readonly onCodeSync = this._onCodeSync.event;
+  public readonly onCodeDelta = this._onCodeDelta.event;
 
-  constructor(serverUrl: string) {
+  constructor(serverUrl: string, roomId?: string, token?: string) {
     this.serverUrl = serverUrl.replace(/\/$/, "");
+    this._roomId = roomId;
+    this._token = token;
   }
+
+  private _roomId?: string;
+  private _token?: string;
 
   private setupListeners(socket: any) {
     socket.on("connect", () => this._onConnect.fire());
@@ -49,13 +58,17 @@ export class SocketClient {
     socket.on("edit:grant", (data: any) => this._onEditGrant.fire(data));
     socket.on("edit:revoke", (data: any) => this._onEditRevoke.fire(data));
     socket.on("edit:deny", (data: any) => this._onEditDeny.fire(data));
+    socket.on("code:sync", (data: any) => this._onCodeSync.fire(data));
+    socket.on("code:delta", (data: any) => this._onCodeDelta.fire(data));
   }
 
   async connect() {
     try {
       const { io } = require("socket.io-client");
+      const auth = this._roomId && this._token ? { roomId: this._roomId, token: this._token } : undefined;
       this.socket = io(this.serverUrl, {
         transports: ["websocket", "polling"],
+        auth,
         reconnection: true,
         reconnectionDelay: 1000,
         reconnectionAttempts: 10,
@@ -67,9 +80,9 @@ export class SocketClient {
   }
 
   connectToRoom(roomId: string, token: string) {
-    if (!this.socket) return;
-    this.socket.removeAllListeners();
-    this.socket.disconnect();
+    this._roomId = roomId;
+    this._token = token;
+    this.disconnect();
     const { io } = require("socket.io-client");
     this.socket = io(this.serverUrl, {
       transports: ["websocket", "polling"],

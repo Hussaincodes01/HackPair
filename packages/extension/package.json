@@ -1,34 +1,66 @@
 {
   "name": "hackpair",
   "displayName": "HackPair",
-  "description": "Real-time code collaboration. Connect to a HackPair server and code with your team.",
-  "version": "0.2.7",
+  "description": "Real-time code collaboration for hackathon teams. See teammates' cursors, code, and files — one click to share, no cloud or accounts.",
+  "version": "0.3.2",
   "publisher": "Hussaincodes01",
   "icon": "icon.png",
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/Hussaincodes01/hackpair" },
-  "engines": { "vscode": "^1.85.0" },
-  "categories": ["Other"],
-  "keywords": ["collaboration", "real-time", "hackathon", "live-share"],
+  "homepage": "https://github.com/Hussaincodes01/hackpair#readme",
+  "bugs": {
+    "url": "https://github.com/Hussaincodes01/hackpair/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Hussaincodes01/hackpair"
+  },
+  "qna": "https://github.com/Hussaincodes01/hackpair/discussions",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "collaboration",
+    "real-time",
+    "hackathon",
+    "live-share",
+    "pair-programming",
+    "remote"
+  ],
+  "galleryBanner": {
+    "color": "#1a1a2e",
+    "theme": "dark"
+  },
   "activationEvents": [
     "onView:hackpair.panel"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {
-      "activitybar": [{ "id": "hacksync", "title": "HackPair", "icon": "$(sync)" }]
+      "activitybar": [
+        {
+          "id": "hacksync",
+          "title": "HackPair",
+          "icon": "$(sync)"
+        }
+      ]
     },
     "views": {
-      "hacksync": [{
-        "type": "webview",
-        "id": "hackpair.panel",
-        "name": "HackPair"
-      }]
+      "hacksync": [
+        {
+          "type": "webview",
+          "id": "hackpair.panel",
+          "name": "HackPair"
+        }
+      ]
     }
   },
   "scripts": {
     "build": "node build.js",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "package": "node package-vsix.js"
   },
   "devDependencies": {
     "@types/node": "^20.12.0",

@@ -20,6 +20,15 @@ export interface FileTreeItem {
   children?: FileTreeItem[];
 }
 
+function safeResolve(folderPath: string, relativePath: string): string | null {
+  const resolved = path.resolve(folderPath, relativePath);
+  const normalizedRoot = path.resolve(folderPath) + path.sep;
+  if (!resolved.startsWith(normalizedRoot)) return null;
+  return resolved;
+}
+
+export { safeResolve };
+
 export function scanWorkspace(folderPath: string): FileTreeItem[] {
   try {
     return scanDir(folderPath, folderPath);
@@ -75,7 +84,8 @@ function scanDir(dirPath: string, rootPath: string): FileTreeItem[] {
 
 export function readFileContent(folderPath: string, relativePath: string): string {
   try {
-    const fullPath = path.join(folderPath, relativePath);
+    const fullPath = safeResolve(folderPath, relativePath);
+    if (!fullPath) return "// File not found";
     const stat = fs.statSync(fullPath);
     if (stat.size > 512 * 1024) return "// File too large to display (>512KB)";
     return fs.readFileSync(fullPath, "utf-8");

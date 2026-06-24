@@ -5,7 +5,7 @@ import { SocketClient } from "./socket-client";
 import { CollaborationSidebar } from "./sidebar";
 import { CursorManager } from "./cursor-manager";
 import { CloudflareTunnel } from "./tunnel";
-import { scanWorkspace, readFileContent, watchWorkspace } from "./workspace";
+import { scanWorkspace, readFileContent, watchWorkspace, safeResolve } from "./workspace";
 
 let socketClient: SocketClient | null = null;
 let sidebar: CollaborationSidebar | null = null;
@@ -33,17 +33,12 @@ function startServer(port: number = 3001): Promise<{ port: number; url: string }
   return new Promise((resolve, reject) => {
     const serverPath = path.join(extContext.extensionPath, "dist", "server.js");
     const { spawn } = require("child_process");
-    const childEnv: Record<string, string> = { PORT: String(port) };
-    for (const key of Object.keys(process.env)) {
-      if (key.startsWith("CLOUDFLARED_") || key === "NODE_ENV" || key === "HOME" || key === "USERPROFILE" || key === "PATH" || key === "APPDATA" || key === "SystemRoot" || key === "TEMP" || key === "TMP") {
-        childEnv[key] = process.env[key]!;
-      }
-    }
 
     killExistingServer();
     serverProcess = spawn(process.execPath, [serverPath], {
-      env: childEnv,
+      env: { ...process.env, PORT: String(port) },
       stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
     });
 
     let exitCode: number | null = null;
@@ -67,7 +62,7 @@ function startServer(port: number = 3001): Promise<{ port: number; url: string }
       reject(new Error(`Failed to start server: ${err.message}`));
     });
 
-    serverProcess.on("exit", (code) => {
+    serverProcess.on("exit", (code: number | null) => {
       exitCode = code;
       if (code !== 0 && !seenStartup) {
         reject(new Error(`Server exited unexpectedly (code ${code}). ${errorOutput.slice(0, 200)}`));
@@ -133,13 +128,14 @@ async function resolveWorkspaceFolder(): Promise<string | null> {
 function parseInviteLink(link: string): { serverUrl: string; inviteCode: string } | null {
   try {
     const trimmed = link.trim();
+    if (trimmed.length > 500) return null;
     if (/^https?:\/\//.test(trimmed)) {
       const url = new URL(trimmed);
       const code = url.searchParams.get("room");
       if (!code) return null;
       return { serverUrl: `${url.protocol}//${url.host}`, inviteCode: code.toUpperCase() };
     }
-    if (/^[A-Za-z0-9]{6}$/.test(trimmed)) return { serverUrl: "", inviteCode: trimmed.toUpperCase() };
+    if (/^[A-Za-z0-9]{6}$/.test(trimmed)) return { serverUrl: "http://localhost:3001", inviteCode: trimmed.toUpperCase() };
     return null;
   } catch { return null; }
 }
@@ -197,8 +193,8 @@ export function activate(ctx: vscode.ExtensionContext) {
             vscode.window.showInformationMessage(`HackPair: Public tunnel active.`);
           }
         } catch (tunnelErr: any) {
-          console.warn("HackPair: Cloudflare tunnel failed, using local URL:", tunnelErr.message);
-          vscode.window.showWarningMessage(`HackPair: Public tunnel unavailable. Using local network link.`);
+          console.warn("HackPair: Cloudflare tunnel failed:", tunnelErr.message);
+          vscode.window.showWarningMessage(`HackPair: ${tunnelErr.message}. Using local network link.`);
         }
 
         const res = await fetch(`${localUrl}/api/rooms`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: `${displayName}'s Room` }) });
@@ -245,8 +241,8 @@ export function activate(ctx: vscode.ExtensionContext) {
       canEditRemote = false;
 
       const parsed = parseInviteLink(msg.inviteLink || "");
-      if (!parsed || !parsed.serverUrl) {
-        sidebar?.updateState({ error: "Invalid invite link." });
+      if (!parsed) {
+        sidebar?.updateState({ error: "Invalid invite link. Paste the full URL (e.g. http://192.168.1.100:3001?room=ABC123) or just the 6-character invite code." });
         return;
       }
 
@@ -278,7 +274,12 @@ export function activate(ctx: vscode.ExtensionContext) {
 
         vscode.window.showInformationMessage(`HackPair: Joined "${roomName}"`);
       } catch (err: any) {
-        sidebar?.updateState({ connecting: false, error: err.message });
+        const msg = err.message || "";
+        if (msg.includes("fetch failed") || msg.includes("ECONNREFUSED") || msg.includes("ENOTFOUND") || msg.includes("network") || msg.includes("timeout")) {
+          sidebar?.updateState({ connecting: false, error: `Cannot reach server at ${parsed.serverUrl}. Make sure the host's server is running and you're on the same network (or use a tunnel URL).` });
+        } else {
+          sidebar?.updateState({ connecting: false, error: msg });
+        }
       }
     }
 
@@ -312,8 +313,10 @@ export function activate(ctx: vscode.ExtensionContext) {
       const memberId = msg.memberId;
 
       if (memberId === "self" && workspaceFolder) {
-        const fullPath = path.join(workspaceFolder, filePath);
-        vscode.window.showTextDocument(vscode.Uri.file(fullPath));
+        const fullPath = safeResolve(workspaceFolder, filePath);
+        if (fullPath) {
+          vscode.window.showTextDocument(vscode.Uri.file(fullPath));
+        }
         return;
       }
 
@@ -326,6 +329,8 @@ export function activate(ctx: vscode.ExtensionContext) {
       cfTunnel = null;
       stopWorkspaceWatcher();
       canEditRemote = false;
+      workspaceFolder = "";
+      fileContents.clear();
       ctx.globalState.update("hackpair.roomId", undefined);
       ctx.globalState.update("hackpair.token", undefined);
       ctx.globalState.update("hackpair.roomName", undefined);
@@ -333,10 +338,11 @@ export function activate(ctx: vscode.ExtensionContext) {
       ctx.globalState.update("hackpair.inviteUrl", undefined);
       ctx.globalState.update("hackpair.role", undefined);
       ctx.globalState.update("hackpair.canEdit", undefined);
+      ctx.globalState.update("hackpair.serverUrl", undefined);
       socketClient?.disconnect();
       cursorManager?.clearAllCursors();
       sidebar?.reset();
-      fileContents.clear();
+      stopServer();
     }
 
     if (msg.type === "requestEditAccess") {
@@ -371,7 +377,27 @@ export function activate(ctx: vscode.ExtensionContext) {
   if (savedRoomId && savedToken && savedServerUrl) {
     canEditRemote = savedCanEdit;
     sidebar?.updateState({ roomName: savedRoomName, inviteCode: savedInviteCode, inviteUrl: savedInviteUrl, displayName: savedName, connected: true, role: savedRole, canEdit: savedCanEdit });
-    connectToServer(savedServerUrl, ctx, savedRoomId, savedToken);
+
+    // Try to start server and reconnect
+    (async () => {
+      try {
+        if (savedRole === "host") {
+          // Host needs to start the server
+          await startServer();
+        }
+        connectToServer(savedServerUrl, ctx, savedRoomId, savedToken);
+      } catch (err: any) {
+        console.warn("HackPair: Failed to reconnect:", err.message);
+        sidebar?.updateState({ connecting: false, error: "Failed to reconnect. Please rejoin the room." });
+        ctx.globalState.update("hackpair.roomId", undefined);
+        ctx.globalState.update("hackpair.token", undefined);
+        ctx.globalState.update("hackpair.roomName", undefined);
+        ctx.globalState.update("hackpair.inviteCode", undefined);
+        ctx.globalState.update("hackpair.inviteUrl", undefined);
+        ctx.globalState.update("hackpair.role", undefined);
+        ctx.globalState.update("hackpair.canEdit", undefined);
+      }
+    })();
   }
 
   ctx.subscriptions.push(vscode.window.onDidChangeTextEditorSelection((e) => {
@@ -408,11 +434,10 @@ export function activate(ctx: vscode.ExtensionContext) {
 
 function connectToServer(url: string, ctx: vscode.ExtensionContext, roomId?: string, token?: string) {
   socketClient?.disconnect();
-  socketClient = new SocketClient(url);
+  socketClient = new SocketClient(url, roomId, token);
 
   socketClient.onConnect(() => {
     sidebar?.updateState({ connected: true });
-    if (roomId && token) socketClient?.connectToRoom(roomId, token);
   });
 
   socketClient.onDisconnect(() => sidebar?.updateState({ connected: false, members: [] }));
@@ -421,6 +446,18 @@ function connectToServer(url: string, ctx: vscode.ExtensionContext, roomId?: str
   socketClient.onMemberLeave((data) => sidebar?.removeMember(data.memberId));
 
   socketClient.onCodeEdit((data) => applyRemoteEdit(data.fileId, data.content));
+
+  socketClient.onCodeSync((data) => {
+    // Handle Y.js state sync - for now we'll just log it
+    // Full Y.js integration would go here
+    console.log("HackPair: Received code sync update");
+  });
+
+  socketClient.onCodeDelta((data) => {
+    // Handle Y.js delta updates - for now we'll just log it
+    // Full Y.js integration would go here
+    console.log("HackPair: Received code delta update");
+  });
 
   socketClient.onCursorUpdate((data) => {
     cursorManager?.updateCursor(data.memberId, data.displayName, data.colour, data.fileId, data.line, data.col);

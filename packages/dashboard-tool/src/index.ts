@@ -84,7 +84,7 @@ async function main() {
 
   console.log(`
   ╔══════════════════════════════════════╗
-  ║       HackPair Server v0.1.0        ║
+  ║       HackPair Server v0.3.2        ║
   ║   Real-time code collaboration      ║
   ╚══════════════════════════════════════╝
 

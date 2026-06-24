@@ -47,23 +47,34 @@ export function setupSocketIO(io: SocketIOServer, stmts: any) {
 
   io.on("connection", (socket: Socket) => {
     const { token, roomId } = socket.handshake.auth;
-    console.log(`Socket connected: ${socket.id} (room: ${roomId}, token: ${token ? "yes" : "no"})`);
+    console.log(`Socket connected: ${socket.id} (room: ${roomId || "dashboard"}, token: ${token ? "yes" : "no"})`);
 
+    let member: any = null;
+    let isDashboard = false;
+
+    // No roomId ⇒ this is a dashboard viewer (read-only global observer).
+    // Let it join every existing room so it receives presence/event broadcasts
+    // for live dashboard updates, then we're done — it doesn't auth as a member.
     if (!roomId) {
-      socket.disconnect();
+      for (const existingRoomId of rooms.keys()) {
+        socket.join(existingRoomId);
+      }
+      // Let the dashboard request to observe a specific room (used on refresh).
+      socket.on("dashboard:observe", (id: string) => {
+        if (typeof id === "string" && rooms.has(id)) socket.join(id);
+      });
+      socket.on("disconnect", () => {
+        console.log(`Dashboard socket disconnected: ${socket.id}`);
+      });
       return;
     }
 
     socket.join(roomId);
     const state = getOrCreateRoomState(roomId);
 
-    let member: any = null;
-    let isDashboard = false;
-
-    if (token && token.startsWith("tok_")) {
+    if (token && token.length === 64) {
       const members = stmts.getRoomMembers(roomId);
-      const memberId = token.replace("tok_", "");
-      member = members.find((m: any) => m.id === memberId);
+      member = members.find((m: any) => m.token === token);
     }
 
     if (!member) {
@@ -315,6 +326,7 @@ export function setupSocketIO(io: SocketIOServer, stmts: any) {
         state.memberSockets.delete(memberId);
         if (!isDashboard) {
           state.members.delete(memberId);
+          stmts.removeMember(memberId);
           if (memberId !== state.hostMemberId) {
             state.editPermissions.delete(memberId);
           } else {

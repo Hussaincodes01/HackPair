@@ -7,20 +7,21 @@ const MEMBER_COLORS = [
   "#F97316", "#14B8A6",
 ];
 
+const MAX_MEMBERS_PER_ROOM = 20;
+
 function generateInviteCode(): string {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  const maxValid = 252; // 256 - (256 % 36) = 252, ensures uniform distribution
-  const bytes = randomBytes(12); // fetch extra for rejection sampling
-  let code = "";
-  let i = 0;
-  while (code.length < 6) {
-    if (i >= bytes.length) break;
-    if (bytes[i] < maxValid) {
-      code += chars[bytes[i] % chars.length];
+  const maxValid = 252;
+  while (true) {
+    const bytes = randomBytes(12);
+    let code = "";
+    for (let i = 0; i < bytes.length && code.length < 6; i++) {
+      if (bytes[i] < maxValid) {
+        code += chars[bytes[i] % chars.length];
+      }
     }
-    i++;
+    if (code.length === 6) return code;
   }
-  return code;
 }
 
 function requireRoom(stmts: any, roomId: string, reply: any): any | null {
@@ -35,7 +36,7 @@ function requireRoom(stmts: any, roomId: string, reply: any): any | null {
 export function registerRoutes(app: FastifyInstance, stmts: any) {
   // Health check
   app.get("/api/health", async () => {
-    return { status: "ok", version: "0.1.0", uptime: process.uptime() };
+    return { status: "ok", version: "0.3.2", uptime: process.uptime() };
   });
 
   // Create room
@@ -100,21 +101,7 @@ export function registerRoutes(app: FastifyInstance, stmts: any) {
         joinedAt: m.joined_at,
         lastSeenAt: m.last_seen_at,
       })),
-      fileTree: [
-        {
-          name: "src", path: "src", type: "directory",
-          children: [
-            { name: "components", path: "src/components", type: "directory", children: [
-              { name: "Button.tsx", path: "src/components/Button.tsx", type: "file" },
-            ]},
-            { name: "index.ts", path: "src/index.ts", type: "file" },
-            { name: "utils.ts", path: "src/utils.ts", type: "file" },
-          ],
-        },
-        { name: "package.json", path: "package.json", type: "file" },
-        { name: "README.md", path: "README.md", type: "file" },
-        { name: "tsconfig.json", path: "tsconfig.json", type: "file" },
-      ],
+      fileTree: [],
     };
   });
 
@@ -133,15 +120,18 @@ export function registerRoutes(app: FastifyInstance, stmts: any) {
     const room = requireRoom(stmts, id, reply);
     if (!room) return;
 
-    const memberId = randomUUID();
     const existingMembers = stmts.getRoomMembers(id);
+    if (existingMembers.length >= MAX_MEMBERS_PER_ROOM) {
+      return reply.status(400).send({ error: `Room is full (max ${MAX_MEMBERS_PER_ROOM} members)` });
+    }
+
+    const memberId = randomUUID();
     const colorIndex = existingMembers.length % MEMBER_COLORS.length;
     const colour = MEMBER_COLORS[colorIndex];
+    const token = randomBytes(32).toString("hex");
 
-    stmts.insertMember(memberId, id, displayName.trim(), colour);
+    stmts.insertMember(memberId, id, displayName.trim(), colour, token);
     stmts.updateRoomActivity(id);
-
-    const token = `tok_${memberId}`;
 
     return {
       memberId,

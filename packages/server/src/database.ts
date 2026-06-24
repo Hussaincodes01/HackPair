@@ -56,11 +56,14 @@ export async function createDatabase(): Promise<SqlJsDatabase> {
       room_id TEXT NOT NULL,
       display_name TEXT NOT NULL CHECK(length(display_name) <= 50),
       colour TEXT NOT NULL,
+      token TEXT NOT NULL DEFAULT '',
       joined_at TEXT NOT NULL,
       last_seen_at TEXT NOT NULL,
       FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE
     )
   `);
+
+  try { db.run("ALTER TABLE members ADD COLUMN token TEXT NOT NULL DEFAULT ''"); } catch { /* column may already exist */ }
 
   db.run(`
     CREATE TABLE IF NOT EXISTS events (
@@ -140,11 +143,17 @@ export const stmts = {
   },
 
   getRoom(id: string): any {
-    return parseRow(db.exec("SELECT * FROM rooms WHERE id = ?", [id]));
+    return parseRow(db.exec(
+      "SELECT * FROM rooms WHERE id = ? AND expires_at > ?",
+      [id, new Date().toISOString()]
+    ));
   },
 
   getRoomByInviteCode(code: string): any {
-    return parseRow(db.exec("SELECT * FROM rooms WHERE invite_code = ?", [code]));
+    return parseRow(db.exec(
+      "SELECT * FROM rooms WHERE invite_code = ? AND expires_at > ?",
+      [code, new Date().toISOString()]
+    ));
   },
 
   updateRoomActivity(id: string) {
@@ -161,7 +170,8 @@ export const stmts = {
 
   listRooms(): any[] {
     const result = db.exec(
-      "SELECT id, name, invite_code, created_at FROM rooms ORDER BY created_at DESC"
+      "SELECT id, name, invite_code, created_at FROM rooms WHERE expires_at > ? ORDER BY created_at DESC",
+      [new Date().toISOString()]
     );
     const rooms = parseRows(result);
     return rooms.map((row: any) => {
@@ -174,11 +184,11 @@ export const stmts = {
     });
   },
 
-  insertMember(id: string, roomId: string, displayName: string, colour: string) {
+  insertMember(id: string, roomId: string, displayName: string, colour: string, token: string) {
     const now = new Date().toISOString();
     db.run(
-      "INSERT INTO members (id, room_id, display_name, colour, joined_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)",
-      [id, roomId, displayName, colour, now, now]
+      "INSERT INTO members (id, room_id, display_name, colour, token, joined_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [id, roomId, displayName, colour, token, now, now]
     );
     saveDatabase();
   },
@@ -204,6 +214,7 @@ export const stmts = {
       "INSERT INTO events (id, room_id, member_id, type, file_path, created_at) VALUES (?, ?, ?, ?, ?, ?)",
       [id, roomId, memberId, type, filePath, now]
     );
+    saveDatabase();
   },
 
   getRoomEvents(roomId: string, limit: number = 20, offset: number = 0): any[] {

@@ -1,14 +1,21 @@
 {
   "name": "hackpair-server",
-  "version": "0.1.0",
+  "version": "0.3.2",
   "description": "Standalone HackPair server with web dashboard. Manage rooms, see members, monitor activity.",
   "main": "./dist/index.js",
   "bin": {
     "hackpair-server": "./dist/index.js"
   },
   "license": "MIT",
-  "keywords": ["hackpair", "collaboration", "real-time", "dashboard"],
-  "files": ["dist/**"],
+  "keywords": [
+    "hackpair",
+    "collaboration",
+    "real-time",
+    "dashboard"
+  ],
+  "files": [
+    "dist/**"
+  ],
   "scripts": {
     "build": "node build.js",
     "dev": "node build.js && node dist/index.js",
