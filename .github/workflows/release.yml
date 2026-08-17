@@ -1,0 +1,56 @@
+name: Release
+
+# Push a tag like v0.4.0 to build the extension and attach the .vsix to a
+# GitHub Release. The .vsix is gitignored, so this is how the binary ships.
+#
+# Runs on Windows on purpose: the `cloudflared` npm package fetches a
+# platform-specific binary at install time, and package-vsix.js bundles it into
+# the extension so creating a room never waits on a download. Building this on
+# Linux would ship a Linux binary that Windows users cannot use — bloating the
+# package while still forcing them to download cloudflared on first run.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Verify the tag matches the extension version
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG=$(node -p "require('./packages/extension/package.json').version")
+          if [ "$TAG" != "$PKG" ]; then
+            echo "Tag v$TAG does not match packages/extension/package.json ($PKG)" >&2
+            exit 1
+          fi
+
+      # Builds shared + dashboard-tool + extension, copies the cloudflared
+      # binary into the extension, then runs vsce.
+      - name: Build and package .vsix
+        run: npm run package --workspace=packages/extension
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: packages/extension/*.vsix
+          generate_release_notes: true

@@ -18,6 +18,9 @@ export class SocketClient {
   private _onEditDeny = new vscode.EventEmitter<any>();
   private _onCodeSync = new vscode.EventEmitter<any>();
   private _onCodeDelta = new vscode.EventEmitter<any>();
+  private _onAuthOk = new vscode.EventEmitter<any>();
+  private _onAuthError = new vscode.EventEmitter<any>();
+  private _onConnectError = new vscode.EventEmitter<any>();
 
   public readonly onConnect = this._onConnect.event;
   public readonly onDisconnect = this._onDisconnect.event;
@@ -34,6 +37,9 @@ export class SocketClient {
   public readonly onEditDeny = this._onEditDeny.event;
   public readonly onCodeSync = this._onCodeSync.event;
   public readonly onCodeDelta = this._onCodeDelta.event;
+  public readonly onAuthOk = this._onAuthOk.event;
+  public readonly onAuthError = this._onAuthError.event;
+  public readonly onConnectError = this._onConnectError.event;
 
   constructor(serverUrl: string, roomId?: string, token?: string) {
     this.serverUrl = serverUrl.replace(/\/$/, "");
@@ -43,6 +49,7 @@ export class SocketClient {
 
   private _roomId?: string;
   private _token?: string;
+  private _authFailed = false;
 
   private setupListeners(socket: any) {
     socket.on("connect", () => this._onConnect.fire());
@@ -60,9 +67,18 @@ export class SocketClient {
     socket.on("edit:deny", (data: any) => this._onEditDeny.fire(data));
     socket.on("code:sync", (data: any) => this._onCodeSync.fire(data));
     socket.on("code:delta", (data: any) => this._onCodeDelta.fire(data));
+    socket.on("auth:ok", (data: any) => this._onAuthOk.fire(data));
+    socket.on("auth:error", (data: any) => {
+      // The server rejected our token; retrying with it will never succeed.
+      this._authFailed = true;
+      this._onAuthError.fire(data);
+    });
+    socket.on("connect_error", (err: any) => this._onConnectError.fire(err));
   }
 
   async connect() {
+    this.disconnect();
+    this._authFailed = false;
     try {
       const { io } = require("socket.io-client");
       const auth = this._roomId && this._token ? { roomId: this._roomId, token: this._token } : undefined;
@@ -76,22 +92,18 @@ export class SocketClient {
       this.setupListeners(this.socket);
     } catch (err) {
       console.error("HackPair: failed to connect", err);
+      this._onConnectError.fire(err);
     }
   }
 
   connectToRoom(roomId: string, token: string) {
     this._roomId = roomId;
     this._token = token;
-    this.disconnect();
-    const { io } = require("socket.io-client");
-    this.socket = io(this.serverUrl, {
-      transports: ["websocket", "polling"],
-      auth: { roomId, token },
-      reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionAttempts: 10,
-    });
-    this.setupListeners(this.socket);
+    this.connect();
+  }
+
+  authFailed(): boolean {
+    return this._authFailed;
   }
 
   disconnect() {

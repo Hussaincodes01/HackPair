@@ -290,7 +290,7 @@ function renderFileTree(items, depth) {
       return '<div class="tree-item dir" style="' + indent + '"><span class="icon">\\uD83D\\uDCC1</span><span class="name">' + esc(item.name) + '</span></div>' + children;
     }
     const pathAttr = escAttr(item.path);
-    return '<div class="tree-item file" style="' + indent + '" data-path="' + pathAttr + '"><span class="icon">\\uD83D\uDCC4</span><span class="name">' + esc(item.name) + '</span></div>';
+    return '<div class="tree-item file" style="' + indent + '" data-path="' + pathAttr + '"><span class="icon">\\uD83D\\uDCC4</span><span class="name">' + esc(item.name) + '</span></div>';
   }).join('');
 }
 

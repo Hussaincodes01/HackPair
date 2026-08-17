@@ -11,6 +11,15 @@ import os from "os";
 const PORT = parseInt(process.env.PORT || "3001");
 const HOST = process.env.HOST || "0.0.0.0";
 
+// The VS Code extension manages its own tunnel, so it sets this to avoid a
+// second cloudflared process pointing at the same port.
+const TUNNEL_DISABLED = process.env.HACKPAIR_NO_TUNNEL === "1";
+
+// Printed on stdout the moment the server can serve requests. The extension
+// watches for this line, so it must never move behind slow optional startup
+// work (the tunnel) and must stay in sync with SERVER_READY in extension.ts.
+const READY_MARKER = "HACKPAIR_SERVER_READY";
+
 function getLocalIPs(): string[] {
   const interfaces = os.networkInterfaces();
   const ips: string[] = [];
@@ -52,6 +61,10 @@ async function main() {
 
   const { cleanupInterval } = setupSocketIO(io, stmts);
 
+  // Announce readiness before the tunnel: it can take 30s, and clients only
+  // need HTTP + Socket.IO, both of which are live now.
+  console.log(`${READY_MARKER} port=${PORT}`);
+
   const ips = getLocalIPs();
   const ipDisplay = ips.length > 0
     ? ips.map(ip => `  → http://${ip}:${PORT}`).join("\n")
@@ -60,18 +73,20 @@ async function main() {
   // Start a public Cloudflare tunnel automatically (no account / token needed).
   // Falls back silently to local-network access if it can't be established.
   let tunnel: ActiveTunnel | null = null;
-  let publicDisplay = "  (starting public tunnel…)";
-  try {
-    tunnel = await startTunnel(PORT);
-    publicDisplay = `  → ${tunnel.url}`;
-  } catch (err: any) {
-    publicDisplay = `  (public tunnel unavailable — local network only)`;
-    console.warn("HackPair: Cloudflare tunnel failed:", err?.message || err);
+  let publicDisplay = "  (public tunnel managed by the VS Code extension)";
+  if (!TUNNEL_DISABLED) {
+    try {
+      tunnel = await startTunnel(PORT);
+      publicDisplay = `  → ${tunnel.url}`;
+    } catch (err: any) {
+      publicDisplay = `  (public tunnel unavailable — local network only)`;
+      console.warn("HackPair: Cloudflare tunnel failed:", err?.message || err);
+    }
   }
 
   console.log(`
   ╔══════════════════════════════════════╗
-  ║       HackPair Server v0.3.2        ║
+  ║       HackPair Server v0.4.0        ║
   ║   Real-time code collaboration      ║
   ╚══════════════════════════════════════╝
 
@@ -85,7 +100,7 @@ ${publicDisplay}
 
   They connect via the VS Code extension.
 
-  Data stored in: ${process.env.HACKSYNC_DATA_DIR || "./.hacksync"}
+  Data stored in: ${process.env.HACKSYNC_DATA_DIR || "<server>/data"}
   Press Ctrl+C to stop.
 `);
 

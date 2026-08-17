@@ -208,6 +208,25 @@ export const stmts = {
     saveDatabase();
   },
 
+  // Called when a socket drops. The row is kept so the member's token stays
+  // valid and they can reconnect (e.g. after reopening VS Code) — deleting it
+  // here would silently lock them out of their own room.
+  touchMember(id: string) {
+    db.run("UPDATE members SET last_seen_at = ? WHERE id = ?", [
+      new Date().toISOString(),
+      id,
+    ]);
+    saveDatabase();
+  },
+
+  // Reap members that never came back, so long-lived rooms don't fill up.
+  deleteStaleMembers(olderThanMs: number = 24 * 60 * 60 * 1000) {
+    db.run("DELETE FROM members WHERE last_seen_at < ?", [
+      new Date(Date.now() - olderThanMs).toISOString(),
+    ]);
+    saveDatabase();
+  },
+
   insertEvent(id: string, roomId: string, memberId: string, type: string, filePath: string) {
     const now = new Date().toISOString();
     db.run(

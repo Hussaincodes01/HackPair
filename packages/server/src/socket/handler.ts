@@ -50,7 +50,6 @@ export function setupSocketIO(io: SocketIOServer, stmts: any) {
     console.log(`Socket connected: ${socket.id} (room: ${roomId || "dashboard"}, token: ${token ? "yes" : "no"})`);
 
     let member: any = null;
-    let isDashboard = false;
 
     // No roomId ⇒ this is a dashboard viewer (read-only global observer).
     // Let it join every existing room so it receives presence/event broadcasts
@@ -69,45 +68,57 @@ export function setupSocketIO(io: SocketIOServer, stmts: any) {
       return;
     }
 
-    socket.join(roomId);
-    const state = getOrCreateRoomState(roomId);
-
-    if (token && token.length === 64) {
+    if (token && typeof token === "string" && token.length === 64) {
       const members = stmts.getRoomMembers(roomId);
       member = members.find((m: any) => m.token === token);
     }
 
+    // A roomId with no valid token is not a dashboard viewer — dashboards
+    // connect without a roomId. Silently downgrading here handed anyone who
+    // knew a room id a read-only feed of the room, and masked expired tokens
+    // as a mysterious "connected but nothing works" state on the client.
     if (!member) {
-      isDashboard = true;
-      const dashboardId = `dashboard_${socket.id}`;
-      member = { id: dashboardId, display_name: "Dashboard Viewer", colour: "#6c7086" };
+      socket.emit("auth:error", { reason: "invalid_token" });
+      socket.disconnect(true);
+      return;
     }
 
-    if (!isDashboard && state.members.has(member.id)) {
-      const oldSocketId = Array.from(state.socketToMember.entries())
-        .find(([, mid]) => mid === member.id)?.[0];
-      if (oldSocketId) state.socketToMember.delete(oldSocketId);
+    socket.join(roomId);
+    const state = getOrCreateRoomState(roomId);
+
+    // Reconnect: drop the stale socket mapping before registering the new one.
+    const previousSocketId = state.memberSockets.get(member.id);
+    if (previousSocketId && previousSocketId !== socket.id) {
+      state.socketToMember.delete(previousSocketId);
     }
 
-    if (!isDashboard) {
-      if (!state.hostMemberId || state.members.size === 0) {
-        state.hostMemberId = member.id;
-        state.editPermissions.add(member.id);
-      }
-
-      const role = member.id === state.hostMemberId ? "host" : "viewer";
-      state.members.set(member.id, {
-        memberId: member.id,
-        displayName: member.display_name,
-        colour: member.colour,
-        activeFile: "",
-        fileTree: [],
-        role,
-      });
-      if (role === "host") state.editPermissions.add(member.id);
+    if (!state.hostMemberId || state.members.size === 0) {
+      state.hostMemberId = member.id;
     }
+
+    const role = member.id === state.hostMemberId ? "host" : "viewer";
+    state.members.set(member.id, {
+      memberId: member.id,
+      displayName: member.display_name,
+      colour: member.colour,
+      activeFile: "",
+      fileTree: state.members.get(member.id)?.fileTree || [],
+      role,
+    });
+    if (role === "host") state.editPermissions.add(member.id);
+
     state.socketToMember.set(socket.id, member.id);
-    if (!isDashboard) state.memberSockets.set(member.id, socket.id);
+    state.memberSockets.set(member.id, socket.id);
+
+    // Tell the client which identity/role the server settled on, so it can
+    // stop guessing from whichever flow (create vs join) started the session.
+    socket.emit("auth:ok", {
+      memberId: member.id,
+      displayName: member.display_name,
+      colour: member.colour,
+      role,
+      canEdit: state.editPermissions.has(member.id),
+    });
 
     // Send existing members to newly connected client
     state.members.forEach((m) => {
@@ -323,28 +334,30 @@ export function setupSocketIO(io: SocketIOServer, stmts: any) {
       const memberId = state.socketToMember.get(socket.id);
       state.socketToMember.delete(socket.id);
       if (memberId) {
+        // A newer socket for the same member (a reconnect that raced this
+        // disconnect) already owns the mapping — leave it alone.
+        if (state.memberSockets.get(memberId) !== socket.id) return;
         state.memberSockets.delete(memberId);
-        if (!isDashboard) {
-          state.members.delete(memberId);
-          stmts.removeMember(memberId);
-          if (memberId !== state.hostMemberId) {
-            state.editPermissions.delete(memberId);
-          } else {
-            const nextHost = state.members.values().next().value as MemberState | undefined;
-            state.hostMemberId = nextHost?.memberId || null;
-            if (nextHost) {
-              nextHost.role = "host";
-              state.editPermissions.add(nextHost.memberId);
-              io.to(roomId).emit("presence:join", {
-                memberId: nextHost.memberId,
-                displayName: nextHost.displayName,
-                colour: nextHost.colour,
-                role: "host",
-              });
-            }
+        state.members.delete(memberId);
+        // Keep the DB row: the token must survive so the member can rejoin.
+        stmts.touchMember(memberId);
+        if (memberId !== state.hostMemberId) {
+          state.editPermissions.delete(memberId);
+        } else {
+          const nextHost = state.members.values().next().value as MemberState | undefined;
+          state.hostMemberId = nextHost?.memberId || null;
+          if (nextHost) {
+            nextHost.role = "host";
+            state.editPermissions.add(nextHost.memberId);
+            io.to(roomId).emit("presence:join", {
+              memberId: nextHost.memberId,
+              displayName: nextHost.displayName,
+              colour: nextHost.colour,
+              role: "host",
+            });
           }
-          socket.to(roomId).emit("presence:leave", { memberId });
         }
+        socket.to(roomId).emit("presence:leave", { memberId });
       }
       cleanupRoomIfEmpty(roomId);
     });
@@ -352,6 +365,7 @@ export function setupSocketIO(io: SocketIOServer, stmts: any) {
 
   const cleanupInterval = setInterval(() => {
     stmts.deleteExpiredRooms();
+    stmts.deleteStaleMembers();
   }, 60 * 60 * 1000);
 
   return { cleanupInterval };

@@ -8,7 +8,7 @@
 
 No cloud. No dashboard. No Docker. Just your IDE and your team.
 
-[![Version](https://img.shields.io/badge/version-0.2.4-blue?style=flat-square)](https://github.com/Hussaincodes01/hackpair/releases)
+[![Version](https://img.shields.io/badge/version-0.4.0-blue?style=flat-square)](https://github.com/Hussaincodes01/HackSyncOSS/releases)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-purple?style=flat-square&logo=visual-studio-code&logoColor=white)](https://code.visualstudio.com)
 [![Node](https://img.shields.io/badge/Node-18+-brightgreen?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
@@ -30,6 +30,8 @@ HackPair lets you and your teammates code together from anywhere. See each other
 
 > **One extension to start. One link to share. That's it.**
 
+The host's machine runs the server. Your code never touches anyone else's infrastructure.
+
 ---
 
 ## Features
@@ -37,11 +39,12 @@ HackPair lets you and your teammates code together from anywhere. See each other
 | | |
 |---|---|
 | 🔴 **Live Cursors** | See where your teammates are working in your editor |
-| 📝 **Real-Time Sync** | Code edits sync instantly across all members |
+| 📝 **Real-Time Sync** | Code edits sync across all members |
 | 👥 **Team Awareness** | See who's online, click to view their code |
 | 📂 **Shared Workspaces** | Browse anyone's file tree from your sidebar |
 | 🔒 **100% Private** | Your code never leaves your machine |
 | 🔄 **Auto-Reconnect** | Reopen VS Code → back in the team instantly |
+| 🔑 **Edit Permissions** | Viewers are read-only until the host grants access |
 
 ---
 
@@ -49,11 +52,13 @@ HackPair lets you and your teammates code together from anywhere. See each other
 
 ### 1. Install
 
-Download `hackpair-0.2.4.vsix` from [Releases](https://github.com/Hussaincodes01/hackpair/releases) and install:
+Download `hackpair-0.4.0.vsix` from [Releases](https://github.com/Hussaincodes01/HackSyncOSS/releases) and install:
 
 ```bash
-code --install-extension hackpair-0.2.4.vsix
+code --install-extension hackpair-0.4.0.vsix
 ```
+
+Or from the Extensions panel: **⋯ → Install from VSIX…**
 
 > **Zero config.** No account, no token, no setup. Create a room and HackPair starts a public link for you automatically.
 
@@ -82,7 +87,7 @@ code --install-extension hackpair-0.2.4.vsix
 │                    HackPair                        │
 ├────────────────────────────────────────────────────┤
 │                                                    │
-│  http://192.168.1.100:3001?room=ABC123             │
+│  https://ab-cd-ef.trycloudflare.com?room=ABC123    │
 │  [Copy Link] [Copy Code]                           │
 │                                                    │
 │  Team (3)                                          │
@@ -96,6 +101,35 @@ code --install-extension hackpair-0.2.4.vsix
 
 Click any teammate → See their file tree → Click a file → Read their code.
 
+The **host** can edit and broadcast changes. Everyone else joins **read-only** and can press
+*Request Edit Access*; the host gets a Grant/Deny prompt.
+
+---
+
+## What's New in 0.4.0
+
+A round of fixes to the things that stopped the extension working end to end.
+
+| Fix | What was wrong |
+|---|---|
+| **Rooms actually start** | The server was spawned with VS Code's own binary instead of Node, and readiness was detected by waiting for a log line the server never printed. Every *Create Room* failed after 8s. |
+| **Auto-reconnect works** | The server deleted your member record on disconnect, so your saved token was dead the moment you closed VS Code — you silently came back as a read-only observer. |
+| **Cursors & edits land** | File paths were resolved against the VS Code workspace root rather than the shared folder, so they never matched on the receiving side. Now normalised and POSIX-separated, so Windows ↔ macOS/Linux works. |
+| **No more edit ping-pong** | Applying a remote edit re-broadcast it back to the sender. Edits are now debounced and echo-guarded. |
+| **File trees show up** | The tree was pushed on a fixed timer that usually fired before the socket connected. It's now sent on connect. |
+| **Usable invite links** | The link used the first network adapter found — often WSL, Hyper-V, or VirtualBox. Real LAN addresses are now preferred. |
+| **Clicking yourself** | Used to reload the whole VS Code window and drop your session. It now shows your own shared tree. |
+| **Sessions are authenticated** | An unknown token used to be silently downgraded to a read-only viewer, which also let anyone with a room id watch the room. Bad tokens are now rejected outright. |
+| **The public link works** | The packaged extension shipped a 52 MB `cloudflared.exe` at a path no code read, while excluding the module needed to drive it — so the tunnel threw *"cloudflared package not found"* on every install. The binary now lives where the code looks, and the library is bundled. |
+| **No more dead invite links** | cloudflared announces its URL *before* it finishes connecting. On networks that block outbound port 7844 you were handed a public link that returned HTTP 530 to everyone. HackPair now waits for a registered connection and falls back to the LAN link, telling you why. |
+
+Also: one Cloudflare tunnel instead of two, the tunnel points at `127.0.0.1` rather than
+`localhost` (the server binds IPv4 only), the database moved to VS Code global storage
+(the extension folder is wiped on update), and a proper **Leave Room** that releases your slot.
+
+> **Upgrade together.** 0.4.0 changes the extension ↔ server handshake, so every teammate
+> needs 0.4.0 for a room to work.
+
 ---
 
 ## Network Options
@@ -106,6 +140,13 @@ Click any teammate → See their file tree → Click a file → Read their code.
 | **Remote Team** | Built-in [Cloudflare](https://www.cloudflare.com/products/tunnel/) tunnel — fully automatic on room creation, no account or token |
 | **Port Forwarding** | Forward port 3001 on your router |
 
+> Cloudflare quick-tunnel URLs change every time the host restarts. Re-share the link
+> after a restart, or use a LAN address if everyone is on the same network.
+
+> **Tunnel needs outbound port 7844.** Plenty of school, corporate and conference networks
+> block it. If yours does, HackPair says so and falls back to your local network link —
+> share that with teammates on the same WiFi, or tether to a phone hotspot.
+
 ---
 
 ## Tech Stack
@@ -115,9 +156,16 @@ Click any teammate → See their file tree → Click a file → Read their code.
 | Server | [Fastify](https://fastify.io) |
 | Real-time | [Socket.io](https://socket.io) |
 | Database | [sql.js](https://sql.js.org) (SQLite in WASM) |
-| CRDT | [Y.js](https://yjs.dev) |
+| Tunnel | [cloudflared](https://github.com/cloudflare/cloudflared) quick tunnels |
 | Extension | [VS Code API](https://code.visualstudio.com/api) |
 | Language | TypeScript |
+
+> **On sync:** edits currently propagate as whole-file updates from whoever holds edit
+> access. The [Y.js](https://yjs.dev) CRDT plumbing exists on the server, but the client
+> does not emit deltas yet — so two people editing the *same file* at the same time will
+> still overwrite each other. Have one person hold the pen per file, or
+> [open an issue](https://github.com/Hussaincodes01/HackSyncOSS/issues) if you want to help
+> finish it.
 
 ---
 
@@ -126,12 +174,13 @@ Click any teammate → See their file tree → Click a file → Read their code.
 ```
 hackpair/
 ├── packages/
-│   ├── extension/       # VS Code extension
+│   ├── extension/       # VS Code extension (bundles the server)
 │   │   ├── src/         # TypeScript source
-│   │   └── dist/        # Bundled files
-│   ├── server/          # Server source code
+│   │   └── dist/        # esbuild output: extension.js + server.js
+│   ├── server/          # Fastify + Socket.IO server
 │   ├── shared/          # Shared types
-│   └── dashboard-tool/  # Standalone server + dashboard
+│   └── dashboard-tool/  # Standalone server + web dashboard
+└── .github/workflows/   # Tag a release → builds and attaches the .vsix
 ```
 
 ---
@@ -140,21 +189,53 @@ hackpair/
 
 ```bash
 # Clone
-git clone https://github.com/Hussaincodes01/hackpair.git
-cd hackpair
+git clone https://github.com/Hussaincodes01/HackSyncOSS.git
+cd HackSyncOSS
+npm install
 
-# Build shared types
-npx tsc -p packages/shared/tsconfig.json
+# Type-check everything
+npm run typecheck
 
-# Build extension
-cd packages/extension && npx esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node
+# Build the extension + bundled server into packages/extension/dist
+node packages/extension/build.js
 
-# Build server bundle
-npx esbuild packages/server/src/index.ts --bundle --outfile=packages/extension/dist/server.js --platform=node --format=cjs
-
-# Start server
-node packages/extension/dist/server.js
+# Package a .vsix
+npm run package --workspace=packages/extension
 ```
+
+### Running the server standalone
+
+```bash
+PORT=3001 HACKPAIR_NO_TUNNEL=1 node packages/extension/dist/server.js
+```
+
+It prints `HACKPAIR_SERVER_READY port=<port>` once it can serve requests — the extension
+watches for that marker, then confirms with `GET /api/health`.
+
+| Env var | Purpose |
+|---|---|
+| `PORT` | Listen port (default `3001`) |
+| `HOST` | Bind address (default `0.0.0.0`) |
+| `HACKPAIR_NO_TUNNEL` | Set to `1` to skip the Cloudflare tunnel |
+| `HACKSYNC_DATA_DIR` | Where `hacksync.db` lives (default `<server>/data`) |
+
+### Debugging the extension
+
+Open the repo in VS Code and press <kbd>F5</kbd> to launch an Extension Development Host.
+Server logs are forwarded to the **Debug Console** prefixed with `HackPair server:`.
+
+---
+
+## Releasing
+
+```bash
+# 1. Bump the version in packages/*/package.json
+# 2. Commit, then tag:
+git tag v0.4.0
+git push origin v0.4.0
+```
+
+The release workflow builds the `.vsix` and attaches it to the GitHub Release.
 
 ---
 

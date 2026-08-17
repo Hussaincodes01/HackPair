@@ -20,10 +20,26 @@ export interface FileTreeItem {
   children?: FileTreeItem[];
 }
 
+/** File ids travel between machines, so they are always POSIX-separated. */
+export function toPosix(p: string): string {
+  return p.split(path.sep).join("/");
+}
+
+/**
+ * Resolve a peer-supplied relative path inside `folderPath`, refusing anything
+ * that escapes it. Accepts both `/` and `\` separators since the sender may be
+ * on a different OS.
+ */
 function safeResolve(folderPath: string, relativePath: string): string | null {
+  if (typeof relativePath !== "string" || relativePath.length === 0) return null;
+  if (path.isAbsolute(relativePath)) return null;
   const resolved = path.resolve(folderPath, relativePath);
   const normalizedRoot = path.resolve(folderPath) + path.sep;
-  if (!resolved.startsWith(normalizedRoot)) return null;
+  // Windows paths are case-insensitive; a case-differing prefix is still inside.
+  const [a, b] = process.platform === "win32"
+    ? [resolved.toLowerCase(), normalizedRoot.toLowerCase()]
+    : [resolved, normalizedRoot];
+  if (!a.startsWith(b)) return null;
   return resolved;
 }
 
@@ -55,7 +71,7 @@ function scanDir(dirPath: string, rootPath: string): FileTreeItem[] {
       if (entry.name.startsWith(".") && entry.name !== ".env.example") continue;
 
       const fullPath = path.join(dirPath, entry.name);
-      const relativePath = path.relative(rootPath, fullPath);
+      const relativePath = toPosix(path.relative(rootPath, fullPath));
 
       if (entry.isDirectory()) {
         const children = scanDir(fullPath, rootPath);
@@ -103,15 +119,15 @@ export function watchWorkspace(
   );
 
   watcher.onDidCreate((uri) => {
-    callback("created", path.relative(folderPath, uri.fsPath));
+    callback("created", toPosix(path.relative(folderPath, uri.fsPath)));
   });
 
   watcher.onDidDelete((uri) => {
-    callback("deleted", path.relative(folderPath, uri.fsPath));
+    callback("deleted", toPosix(path.relative(folderPath, uri.fsPath)));
   });
 
   watcher.onDidChange((uri) => {
-    callback("changed", path.relative(folderPath, uri.fsPath));
+    callback("changed", toPosix(path.relative(folderPath, uri.fsPath)));
   });
 
   return watcher;

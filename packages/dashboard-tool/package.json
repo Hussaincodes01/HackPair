@@ -1,6 +1,6 @@
-{
+﻿{
   "name": "hackpair-server",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "Standalone HackPair server with web dashboard. Manage rooms, see members, monitor activity.",
   "main": "./dist/index.js",
   "bin": {

@@ -2,19 +2,19 @@
   "name": "hackpair",
   "displayName": "HackPair",
   "description": "Real-time code collaboration for hackathon teams. See teammates' cursors, code, and files — one click to share, no cloud or accounts.",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "publisher": "Hussaincodes01",
   "icon": "icon.png",
   "license": "MIT",
-  "homepage": "https://github.com/Hussaincodes01/hackpair#readme",
+  "homepage": "https://github.com/Hussaincodes01/HackSyncOSS#readme",
   "bugs": {
-    "url": "https://github.com/Hussaincodes01/hackpair/issues"
+    "url": "https://github.com/Hussaincodes01/HackSyncOSS/issues"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Hussaincodes01/hackpair"
+    "url": "https://github.com/Hussaincodes01/HackSyncOSS"
   },
-  "qna": "https://github.com/Hussaincodes01/hackpair/discussions",
+  "qna": "https://github.com/Hussaincodes01/HackSyncOSS/discussions",
   "engines": {
     "vscode": "^1.85.0"
   },

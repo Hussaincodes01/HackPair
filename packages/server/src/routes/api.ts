@@ -36,7 +36,7 @@ function requireRoom(stmts: any, roomId: string, reply: any): any | null {
 export function registerRoutes(app: FastifyInstance, stmts: any) {
   // Health check
   app.get("/api/health", async () => {
-    return { status: "ok", version: "0.3.2", uptime: process.uptime() };
+    return { status: "ok", version: "0.4.0", uptime: process.uptime() };
   });
 
   // Create room
@@ -139,6 +139,26 @@ export function registerRoutes(app: FastifyInstance, stmts: any) {
       serverUrl: process.env.SERVER_URL || "http://localhost:3001",
       room: { id: room.id, name: room.name },
     };
+  });
+
+  // Leave room — releases the member row so it stops counting toward the
+  // room limit. Disconnecting alone keeps the row so the token stays valid
+  // for reconnects, so leaving has to be explicit.
+  app.post("/api/rooms/:id/leave", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const { token } = (request.body || {}) as { token?: string };
+
+    if (!token || typeof token !== "string") {
+      return reply.status(400).send({ error: "Token is required" });
+    }
+
+    const member = stmts.getRoomMembers(id).find((m: any) => m.token === token);
+    if (!member) {
+      return reply.status(404).send({ error: "Member not found" });
+    }
+
+    stmts.removeMember(member.id);
+    return { success: true };
   });
 
   // Get activity events
