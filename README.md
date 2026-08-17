@@ -8,7 +8,7 @@
 
 No cloud. No dashboard. No Docker. Just your IDE and your team.
 
-[![Version](https://img.shields.io/badge/version-0.4.0-blue?style=flat-square)](https://github.com/Hussaincodes01/HackSyncOSS/releases)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue?style=flat-square)](https://github.com/Hussaincodes01/HackSyncOSS/releases)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-purple?style=flat-square&logo=visual-studio-code&logoColor=white)](https://code.visualstudio.com)
 [![Node](https://img.shields.io/badge/Node-18+-brightgreen?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
@@ -52,10 +52,10 @@ The host's machine runs the server. Your code never touches anyone else's infras
 
 ### 1. Install
 
-Download `hackpair-0.4.0.vsix` from [Releases](https://github.com/Hussaincodes01/HackSyncOSS/releases) and install:
+Download `hackpair-1.0.0.vsix` from [Releases](https://github.com/Hussaincodes01/HackSyncOSS/releases) and install:
 
 ```bash
-code --install-extension hackpair-0.4.0.vsix
+code --install-extension hackpair-1.0.0.vsix
 ```
 
 Or from the Extensions panel: **⋯ → Install from VSIX…**
@@ -106,7 +106,7 @@ The **host** can edit and broadcast changes. Everyone else joins **read-only** a
 
 ---
 
-## What's New in 0.4.0
+## What's New in 1.0.0
 
 A round of fixes to the things that stopped the extension working end to end.
 
@@ -127,8 +127,8 @@ Also: one Cloudflare tunnel instead of two, the tunnel points at `127.0.0.1` rat
 `localhost` (the server binds IPv4 only), the database moved to VS Code global storage
 (the extension folder is wiped on update), and a proper **Leave Room** that releases your slot.
 
-> **Upgrade together.** 0.4.0 changes the extension ↔ server handshake, so every teammate
-> needs 0.4.0 for a room to work.
+> **Upgrade together.** 1.0.0 changes the extension ↔ server handshake, so every teammate
+> needs 1.0.0 for a room to work.
 
 ---
 
@@ -231,8 +231,8 @@ Server logs are forwarded to the **Debug Console** prefixed with `HackPair serve
 ```bash
 # 1. Bump the version in packages/*/package.json
 # 2. Commit, then tag:
-git tag v0.4.0
-git push origin v0.4.0
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
 The release workflow builds the `.vsix` and attaches it to the GitHub Release.

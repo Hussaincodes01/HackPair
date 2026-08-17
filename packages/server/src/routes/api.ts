@@ -36,7 +36,7 @@ function requireRoom(stmts: any, roomId: string, reply: any): any | null {
 export function registerRoutes(app: FastifyInstance, stmts: any) {
   // Health check
   app.get("/api/health", async () => {
-    return { status: "ok", version: "0.4.0", uptime: process.uptime() };
+    return { status: "ok", version: "1.0.0", uptime: process.uptime() };
   });
 
   // Create room
