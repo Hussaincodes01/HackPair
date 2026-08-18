@@ -8,7 +8,7 @@
 
 No cloud. No dashboard. No Docker. Just your IDE and your team.
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue?style=flat-square)](https://github.com/Hussaincodes01/HackSyncOSS/releases)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue?style=flat-square)](https://github.com/Hussaincodes01/HackPair/releases)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-purple?style=flat-square&logo=visual-studio-code&logoColor=white)](https://code.visualstudio.com)
 [![Node](https://img.shields.io/badge/Node-18+-brightgreen?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
@@ -52,7 +52,7 @@ The host's machine runs the server. Your code never touches anyone else's infras
 
 ### 1. Install
 
-Download `hackpair-1.0.0.vsix` from [Releases](https://github.com/Hussaincodes01/HackSyncOSS/releases) and install:
+Download `hackpair-1.0.0.vsix` from [Releases](https://github.com/Hussaincodes01/HackPair/releases) and install:
 
 ```bash
 code --install-extension hackpair-1.0.0.vsix
@@ -164,7 +164,7 @@ Also: one Cloudflare tunnel instead of two, the tunnel points at `127.0.0.1` rat
 > access. The [Y.js](https://yjs.dev) CRDT plumbing exists on the server, but the client
 > does not emit deltas yet — so two people editing the *same file* at the same time will
 > still overwrite each other. Have one person hold the pen per file, or
-> [open an issue](https://github.com/Hussaincodes01/HackSyncOSS/issues) if you want to help
+> [open an issue](https://github.com/Hussaincodes01/HackPair/issues) if you want to help
 > finish it.
 
 ---
@@ -189,8 +189,8 @@ hackpair/
 
 ```bash
 # Clone
-git clone https://github.com/Hussaincodes01/HackSyncOSS.git
-cd HackSyncOSS
+git clone https://github.com/Hussaincodes01/HackPair.git
+cd HackPair
 npm install
 
 # Type-check everything

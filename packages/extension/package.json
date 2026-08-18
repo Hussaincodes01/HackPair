@@ -6,15 +6,15 @@
   "publisher": "Hussaincodes01",
   "icon": "icon.png",
   "license": "MIT",
-  "homepage": "https://github.com/Hussaincodes01/HackSyncOSS#readme",
+  "homepage": "https://github.com/Hussaincodes01/HackPair#readme",
   "bugs": {
-    "url": "https://github.com/Hussaincodes01/HackSyncOSS/issues"
+    "url": "https://github.com/Hussaincodes01/HackPair/issues"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Hussaincodes01/HackSyncOSS"
+    "url": "https://github.com/Hussaincodes01/HackPair"
   },
-  "qna": "https://github.com/Hussaincodes01/HackSyncOSS/discussions",
+  "qna": "https://github.com/Hussaincodes01/HackPair/discussions",
   "engines": {
     "vscode": "^1.85.0"
   },
